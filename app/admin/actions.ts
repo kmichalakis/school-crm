@@ -590,24 +590,27 @@ export async function importSchoolWorkbookAction(formData: FormData) {
     finishAdminAction("Επιλέξτε αρχείο Excel για εισαγωγή.", "error");
   }
 
-  const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer" });
-  const schoolYearRows = sheetRows(workbook, ["Σχολικά έτη", "SchoolYears"]);
-  const teacherRows = sheetRows(workbook, ["Εκπαιδευτικοί", "Teachers"]);
-  const parentRows = sheetRows(workbook, ["Γονείς", "Parents"]);
-  const classRows = sheetRows(workbook, ["Τμήματα", "Classes"]);
-  const studentRows = sheetRows(workbook, ["Μαθητές", "Students"]);
-  const courseRows = sheetRows(workbook, ["Μαθήματα", "Courses"]);
-  const scheduleRows = sheetRows(workbook, ["Πρόγραμμα", "Schedule"]);
+  let importMessage = "";
 
-  let teachersImported = 0;
-  let parentsImported = 0;
-  let classesImported = 0;
-  let studentsImported = 0;
-  let coursesImported = 0;
-  let scheduleImported = 0;
-  let schoolYearsImported = 0;
+  try {
+    const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer" });
+    const schoolYearRows = sheetRows(workbook, ["Σχολικά έτη", "SchoolYears"]);
+    const teacherRows = sheetRows(workbook, ["Εκπαιδευτικοί", "Teachers"]);
+    const parentRows = sheetRows(workbook, ["Γονείς", "Parents"]);
+    const classRows = sheetRows(workbook, ["Τμήματα", "Classes"]);
+    const studentRows = sheetRows(workbook, ["Μαθητές", "Students"]);
+    const courseRows = sheetRows(workbook, ["Μαθήματα", "Courses"]);
+    const scheduleRows = sheetRows(workbook, ["Πρόγραμμα", "Schedule"]);
 
-  await prisma.$transaction(async (tx) => {
+    let teachersImported = 0;
+    let parentsImported = 0;
+    let classesImported = 0;
+    let studentsImported = 0;
+    let coursesImported = 0;
+    let scheduleImported = 0;
+    let schoolYearsImported = 0;
+
+    await prisma.$transaction(async (tx) => {
     const teacherByAm = new Map<string, string>();
     const teacherByUsername = new Map<string, string>();
     const parentByUsername = new Map<string, string>();
@@ -1011,11 +1014,16 @@ export async function importSchoolWorkbookAction(formData: FormData) {
       });
       scheduleImported += uniqueCourseIds.length;
     }
-  });
+    }, { maxWait: 15000, timeout: 60000 });
 
-  finishAdminAction(
-    `Ολοκληρώθηκε εισαγωγή: ${schoolYearsImported} σχολικά έτη, ${classesImported} τμήματα, ${teachersImported} εκπαιδευτικοί, ${parentsImported} γονείς, ${studentsImported} μαθητές, ${coursesImported} μαθήματα, ${scheduleImported} ώρες προγράμματος.`
-  );
+    importMessage = `Ολοκληρώθηκε εισαγωγή: ${schoolYearsImported} σχολικά έτη, ${classesImported} τμήματα, ${teachersImported} εκπαιδευτικοί, ${parentsImported} γονείς, ${studentsImported} μαθητές, ${coursesImported} μαθήματα, ${scheduleImported} ώρες προγράμματος.`;
+  } catch (error) {
+    console.error("Excel import failed", error);
+    const message = error instanceof Error ? error.message : "Άγνωστο σφάλμα εισαγωγής.";
+    finishAdminAction(`Αποτυχία εισαγωγής Excel: ${message.slice(0, 220)}`, "error");
+  }
+
+  finishAdminAction(importMessage);
 }
 
 export async function promoteSchoolYearAction(formData: FormData) {

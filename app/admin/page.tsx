@@ -24,6 +24,8 @@ import {
 } from "@/app/admin/actions";
 import { schoolHours, weekDays } from "@/lib/school-time";
 
+export const maxDuration = 60;
+
 type AdminPageProps = {
   searchParams: Promise<{
     notice?: string;
