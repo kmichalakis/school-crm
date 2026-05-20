@@ -1,0 +1,328 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SchoolYearStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ClassYear {
+  A
+  B
+  C
+}
+
+enum UserRole {
+  CLASS_TABLET
+  TEACHER
+  ADMIN
+  PARENT
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+}
+
+enum AbsenceStatus {
+  MARKED
+  EXCUSED
+  REMOVED
+}
+
+enum EmailTrigger {
+  FIRST_HOUR_ABSENCE
+  LAST_HOUR_ABSENCE
+  DAILY_THRESHOLD
+  WEEKLY_THRESHOLD
+}
+
+enum ParentNotificationStatus {
+  QUEUED
+  SENT
+  DISMISSED
+}
+
+enum ParentJustificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model SchoolYear {
+  id        String           @id @default(cuid())
+  name      String
+  startsOn  DateTime
+  endsOn    DateTime
+  status    SchoolYearStatus @default(ACTIVE)
+  classes   Class[]
+  students  Student[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model Class {
+  id                   String            @id @default(cuid())
+  name                 String
+  year                 ClassYear
+  schoolYearId         String
+  responsibleTeacherId String?
+  schoolYear           SchoolYear        @relation(fields: [schoolYearId], references: [id])
+  responsibleTeacher   Teacher?          @relation("ResponsibleClassTeacher", fields: [responsibleTeacherId], references: [id])
+  students             Student[]
+  classUsers           User[]
+  teachers             Teacher[]         @relation("TeacherHomeClass")
+  courses              Course[]
+  attendanceSheets     AttendanceSheet[]
+
+  @@unique([schoolYearId, name])
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  username           String    @unique
+  passwordHash       String
+  role               UserRole
+  classId            String?
+  mustChangePassword Boolean   @default(false)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  teacher            Teacher?
+  parent             Parent?
+  class              Class?    @relation(fields: [classId], references: [id])
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model Parent {
+  id                    String                       @id @default(cuid())
+  name                  String
+  surname               String
+  email                 String
+  userId                String                       @unique
+  user                  User                         @relation(fields: [userId], references: [id])
+  students              Student[]
+  notifications         ParentNotification[]
+  justificationRequests ParentJustificationRequest[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+}
+
+model Teacher {
+  id                 String                @id @default(cuid())
+  am                 String                @unique
+  name               String
+  surname            String
+  isAdmin            Boolean               @default(false)
+  userId             String                @unique
+  homeClassId        String?
+  user               User                  @relation(fields: [userId], references: [id])
+  homeClass          Class?                @relation("TeacherHomeClass", fields: [homeClassId], references: [id])
+  responsibleClasses Class[]               @relation("ResponsibleClassTeacher")
+  courses            CourseTeacher[]
+  signatures         AttendanceSignature[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+}
+
+model Student {
+  id                    String                       @id @default(cuid())
+  am                    String
+  name                  String
+  surname               String
+  patronymic            String
+  classId               String
+  parentId              String?
+  schoolYearId          String
+  class                 Class                        @relation(fields: [classId], references: [id])
+  parent                Parent?                      @relation(fields: [parentId], references: [id])
+  schoolYear            SchoolYear                   @relation(fields: [schoolYearId], references: [id])
+  absences              Absence[]
+  sheetAbsences         AttendanceSheetAbsence[]
+  notifications         ParentNotification[]
+  justificationRequests ParentJustificationRequest[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@unique([schoolYearId, am])
+  @@index([classId, surname])
+}
+
+model Course {
+  id               String                @id @default(cuid())
+  aa               String
+  name             String
+  classId          String
+  isNoCourse       Boolean               @default(false)
+  class            Class                 @relation(fields: [classId], references: [id])
+  teachers         CourseTeacher[]
+  schedules        ScheduleSlot[]
+  signatures       AttendanceSignature[]
+  attendanceSheets AttendanceSheet[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@unique([classId, aa])
+  @@unique([classId, name])
+}
+
+model CourseTeacher {
+  courseId  String
+  teacherId String
+  course    Course  @relation(fields: [courseId], references: [id])
+  teacher   Teacher @relation(fields: [teacherId], references: [id])
+
+  @@id([courseId, teacherId])
+  @@unique([courseId])
+}
+
+model ScheduleSlot {
+  id         String                @id @default(cuid())
+  classId    String
+  courseId   String
+  day        WeekDay
+  hour       Int
+  course     Course                @relation(fields: [courseId], references: [id])
+  absences   Absence[]
+  signatures AttendanceSignature[]
+
+  @@unique([classId, day, hour, courseId])
+  @@index([classId, day, hour])
+}
+
+model Absence {
+  id             String        @id @default(cuid())
+  scheduleSlotId String
+  studentId      String
+  status         AbsenceStatus @default(MARKED)
+  notedByUserId  String?
+  excusedById    String?
+  excusedReason  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  scheduleSlot   ScheduleSlot  @relation(fields: [scheduleSlotId], references: [id])
+  student        Student       @relation(fields: [studentId], references: [id])
+
+  @@unique([scheduleSlotId, studentId])
+  @@index([studentId, createdAt])
+}
+
+model AttendanceSignature {
+  id             String       @id @default(cuid())
+  scheduleSlotId String
+  courseId       String
+  teacherId      String
+  signedAt       DateTime     @default(now())
+  notes          String?
+  scheduleSlot   ScheduleSlot @relation(fields: [scheduleSlotId], references: [id])
+  course         Course       @relation(fields: [courseId], references: [id])
+  teacher        Teacher      @relation(fields: [teacherId], references: [id])
+
+  @@unique([scheduleSlotId, teacherId])
+}
+
+model AttendanceSheet {
+  id                    String                       @id @default(cuid())
+  classId               String
+  courseId              String
+  day                   WeekDay
+  hour                  Int
+  teacherName           String
+  savedAt               DateTime?
+  signedAt              DateTime?
+  signedByTeacherId     String?
+  class                 Class                        @relation(fields: [classId], references: [id])
+  course                Course                       @relation(fields: [courseId], references: [id])
+  absences              AttendanceSheetAbsence[]
+  justificationRequests ParentJustificationRequest[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@unique([classId, day, hour])
+  @@index([classId, day])
+}
+
+model AttendanceSheetAbsence {
+  sheetId       String
+  studentId     String
+  absent        Boolean         @default(true)
+  status        AbsenceStatus   @default(MARKED)
+  excusedReason String?
+  excusedAt     DateTime?
+  updatedAt     DateTime        @default(now()) @updatedAt
+  sheet         AttendanceSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  student       Student         @relation(fields: [studentId], references: [id])
+
+  @@id([sheetId, studentId])
+  @@index([studentId, updatedAt])
+}
+
+model ExcusedAbsencePeriod {
+  id           String   @id @default(cuid())
+  studentId    String
+  startsAt     DateTime
+  endsAt       DateTime
+  reason       String?
+  approvedById String
+  createdAt    DateTime @default(now())
+}
+
+model EmailRule {
+  id             String       @id @default(cuid())
+  name           String
+  trigger        EmailTrigger
+  enabled        Boolean      @default(true)
+  thresholdCount Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model ParentNotification {
+  id        String                   @id @default(cuid())
+  parentId  String
+  studentId String
+  sheetId   String
+  type      EmailTrigger
+  status    ParentNotificationStatus @default(QUEUED)
+  subject   String
+  body      String
+  sentAt    DateTime?
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+  parent    Parent                   @relation(fields: [parentId], references: [id])
+  student   Student                  @relation(fields: [studentId], references: [id])
+
+  @@unique([parentId, studentId, sheetId, type])
+  @@index([status, createdAt])
+  @@index([parentId, createdAt])
+}
+
+model ParentJustificationRequest {
+  id             String                    @id @default(cuid())
+  parentId       String
+  studentId      String
+  sheetId        String
+  status         ParentJustificationStatus @default(PENDING)
+  reason         String
+  schoolResponse String?
+  reviewedAt     DateTime?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  parent         Parent                    @relation(fields: [parentId], references: [id])
+  student        Student                   @relation(fields: [studentId], references: [id])
+  sheet          AttendanceSheet           @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId, sheetId])
+  @@index([status, createdAt])
+  @@index([studentId, createdAt])
+}
