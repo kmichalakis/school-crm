@@ -2,7 +2,7 @@ import { AttendanceBoard } from "@/app/attendance-board";
 import { LoginForm } from "@/app/login-form";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import { getCurrentSchoolHour, weekDays } from "@/lib/school-time";
+import { schoolHours, weekDays } from "@/lib/school-time";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -14,10 +14,6 @@ type HomeProps = {
   }>;
 };
 
-function validInitialDay(day: string | undefined): string {
-  return day && weekDays.some((weekDay) => weekDay.value === day) ? day : "MONDAY";
-}
-
 function validInitialHour(hour: string | undefined) {
   const parsedHour = Number(hour);
 
@@ -25,7 +21,48 @@ function validInitialHour(hour: string | undefined) {
     return parsedHour;
   }
 
-  return getCurrentSchoolHour().hour;
+  return currentGreekSchoolSelection().hour;
+}
+
+function currentGreekSchoolSelection() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Athens",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date());
+  const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  const dayByWeekday: Record<string, string> = {
+    Mon: "MONDAY",
+    Tue: "TUESDAY",
+    Wed: "WEDNESDAY",
+    Thu: "THURSDAY",
+    Fri: "FRIDAY"
+  };
+  const day = weekday ? dayByWeekday[weekday] : undefined;
+
+  if (!day || !Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return { day: "MONDAY", hour: 1 };
+  }
+
+  const minutes = hour * 60 + minute;
+  const schoolHour = schoolHours.find((slot) => {
+    const [startHour, startMinute] = slot.starts.split(":").map(Number);
+    const [endHour, endMinute] = slot.ends.split(":").map(Number);
+    const start = startHour * 60 + startMinute;
+    const end = endHour * 60 + endMinute;
+
+    return minutes >= start && minutes <= end;
+  });
+
+  return { day, hour: schoolHour?.hour ?? 1 };
+}
+
+function initialDay(day: string | undefined) {
+  return day && weekDays.some((weekDay) => weekDay.value === day) ? day : currentGreekSchoolSelection().day;
 }
 
 export default async function Home({ searchParams }: HomeProps) {
@@ -126,7 +163,7 @@ export default async function Home({ searchParams }: HomeProps) {
       initialMode={isClassTablet ? "tablet" : "teacher"}
       userLabel={userLabel}
       initialClassId={initialClassId}
-      initialDay={validInitialDay(params.day)}
+      initialDay={initialDay(params.day)}
       initialHour={validInitialHour(params.hour)}
       availableClasses={availableClasses}
       username={user.username}

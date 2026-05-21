@@ -119,20 +119,21 @@ model Parent {
 }
 
 model Teacher {
-  id                 String                @id @default(cuid())
-  am                 String                @unique
-  name               String
-  surname            String
-  isAdmin            Boolean               @default(false)
-  userId             String                @unique
-  homeClassId        String?
-  user               User                  @relation(fields: [userId], references: [id])
-  homeClass          Class?                @relation("TeacherHomeClass", fields: [homeClassId], references: [id])
-  responsibleClasses Class[]               @relation("ResponsibleClassTeacher")
-  courses            CourseTeacher[]
-  signatures         AttendanceSignature[]
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  id                     String                  @id @default(cuid())
+  am                     String                  @unique
+  name                   String
+  surname                String
+  isAdmin                Boolean                 @default(false)
+  userId                 String                  @unique
+  homeClassId            String?
+  user                   User                    @relation(fields: [userId], references: [id])
+  homeClass              Class?                  @relation("TeacherHomeClass", fields: [homeClassId], references: [id])
+  responsibleClasses     Class[]                 @relation("ResponsibleClassTeacher")
+  courses                CourseTeacher[]
+  attendanceSheetCourses AttendanceSheetCourse[]
+  signatures             AttendanceSignature[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 }
 
 model Student {
@@ -159,18 +160,19 @@ model Student {
 }
 
 model Course {
-  id               String                @id @default(cuid())
-  aa               String
-  name             String
-  classId          String
-  isNoCourse       Boolean               @default(false)
-  class            Class                 @relation(fields: [classId], references: [id])
-  teachers         CourseTeacher[]
-  schedules        ScheduleSlot[]
-  signatures       AttendanceSignature[]
-  attendanceSheets AttendanceSheet[]
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  id                     String                  @id @default(cuid())
+  aa                     String
+  name                   String
+  classId                String
+  isNoCourse             Boolean                 @default(false)
+  class                  Class                   @relation(fields: [classId], references: [id])
+  teachers               CourseTeacher[]
+  schedules              ScheduleSlot[]
+  signatures             AttendanceSignature[]
+  attendanceSheets       AttendanceSheet[]
+  attendanceSheetCourses AttendanceSheetCourse[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   @@unique([classId, aa])
   @@unique([classId, name])
@@ -244,12 +246,31 @@ model AttendanceSheet {
   class                 Class                        @relation(fields: [classId], references: [id])
   course                Course                       @relation(fields: [courseId], references: [id])
   absences              AttendanceSheetAbsence[]
+  courses               AttendanceSheetCourse[]
   justificationRequests ParentJustificationRequest[]
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
 
   @@unique([classId, day, hour])
   @@index([classId, day])
+}
+
+model AttendanceSheetCourse {
+  id        String          @id @default(cuid())
+  sheetId   String
+  courseId  String
+  teacherId String?
+  position  Int
+  signedAt  DateTime?
+  sheet     AttendanceSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  course    Course          @relation(fields: [courseId], references: [id])
+  teacher   Teacher?        @relation(fields: [teacherId], references: [id])
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([sheetId, position])
+  @@index([courseId])
+  @@index([teacherId])
 }
 
 model AttendanceSheetAbsence {

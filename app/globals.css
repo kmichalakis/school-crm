@@ -307,6 +307,18 @@ button:disabled {
   padding: 24px;
 }
 
+.tablet-shell .topbar {
+  position: static;
+}
+
+.tablet-shell .user-chip {
+  display: none;
+}
+
+.tablet-workspace {
+  grid-template-columns: 1fr;
+}
+
 .sidebar {
   align-self: start;
   display: grid;
@@ -507,6 +519,34 @@ button:disabled {
   color: var(--foreground);
 }
 
+.course-picker-field {
+  grid-column: span 2;
+}
+
+.course-entry-list {
+  display: grid;
+  gap: 8px;
+}
+
+.course-entry-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.course-teacher-name {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--soft);
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
 .attendance-panel {
   overflow: hidden;
 }
@@ -599,6 +639,74 @@ button:disabled {
   gap: 10px;
   padding: 16px;
   border-top: 1px solid var(--line);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(18, 30, 32, 0.48);
+}
+
+.signature-modal {
+  display: grid;
+  gap: 16px;
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 18px 60px rgba(20, 30, 33, 0.24);
+}
+
+.signature-modal h3 {
+  margin: 0;
+}
+
+.signature-modal p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.signature-course-list {
+  display: grid;
+  gap: 10px;
+}
+
+.signature-course-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(130px, 160px);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.signature-course-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.signature-course-row span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.signature-course-row input {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .status-message {
@@ -1217,6 +1325,15 @@ button:disabled {
   .dashboard-grid,
   .print-meta-grid,
   .print-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .course-picker-field {
+    grid-column: auto;
+  }
+
+  .course-entry-row,
+  .signature-course-row {
     grid-template-columns: 1fr;
   }
 

@@ -12,6 +12,8 @@ import {
   FileSpreadsheet,
   LockKeyhole,
   Mail,
+  Minus,
+  Plus,
   Printer,
   Save,
   ShieldCheck,
@@ -20,7 +22,7 @@ import {
 } from "lucide-react";
 import { currentContext, demoClass, demoCourses, demoStudents } from "@/lib/demo-data";
 import { schoolHours, weekDays } from "@/lib/school-time";
-import type { AttendanceSheetPayload, SaveAttendanceAction } from "@/lib/attendance-types";
+import type { AttendanceCourseEntry, AttendanceCourseOption, AttendanceSheetPayload, SaveAttendanceAction } from "@/lib/attendance-types";
 
 type UserMode = "tablet" | "teacher";
 type DatabaseStatus = "unknown" | "ready" | "fallback";
@@ -56,11 +58,20 @@ function getSheetKey(classId: string, day: string, hour: number) {
 }
 
 function createDefaultSheet(day: string, hour: number): AttendanceSheetPayload {
+  const defaultCourseOption = {
+    courseId: "demo-course",
+    name: currentContext.course,
+    teacherId: "demo-teacher",
+    teacherName: currentContext.teacher
+  };
+
   return {
     day,
     hour,
     course: currentContext.course,
     courses: demoCourses,
+    courseOptions: [defaultCourseOption],
+    courseEntries: [{ ...defaultCourseOption, position: 0, signedAt: null }],
     teacherName: currentContext.teacher,
     students: demoStudents,
     signedAt: null,
@@ -90,6 +101,62 @@ function writeStoredSheets(sheets: Record<string, AttendanceSheetPayload>) {
   window.localStorage.setItem(storageKey, JSON.stringify(sheets));
 }
 
+function fallbackCourseOptions(sheet: AttendanceSheetPayload): AttendanceCourseOption[] {
+  if (sheet.courseOptions && sheet.courseOptions.length > 0) {
+    return sheet.courseOptions;
+  }
+
+  return (sheet.courses && sheet.courses.length > 0 ? sheet.courses : demoCourses).map((courseName, index) => ({
+    courseId: courseName === sheet.course ? "legacy-current-course" : `legacy-course-${index}`,
+    name: courseName,
+    teacherId: null,
+    teacherName: courseName === sheet.course ? sheet.teacherName : "Δεν έχει οριστεί εκπαιδευτικός"
+  }));
+}
+
+function normalizedCourseEntries(sheet: AttendanceSheetPayload): AttendanceCourseEntry[] {
+  if (sheet.courseEntries && sheet.courseEntries.length > 0) {
+    return sheet.courseEntries.slice(0, 2).map((entry, index) => ({
+      ...entry,
+      position: index
+    }));
+  }
+
+  const options = fallbackCourseOptions(sheet);
+  const selectedOption = options.find((option) => option.name === sheet.course) ?? options[0];
+  if (!selectedOption) {
+    return [];
+  }
+
+  return [
+    {
+      ...selectedOption,
+      position: 0,
+      signedAt: sheet.signedAt
+    }
+  ];
+}
+
+function sheetWithCourseEntries(sheet: AttendanceSheetPayload, courseEntries: AttendanceCourseEntry[]): AttendanceSheetPayload {
+  const teacherNames = Array.from(new Set(courseEntries.map((entry) => entry.teacherName).filter(Boolean)));
+  const fullSignedAt =
+    courseEntries.length > 0 && courseEntries.every((entry) => entry.signedAt)
+      ? courseEntries
+          .map((entry) => entry.signedAt)
+          .filter((signedAt): signedAt is string => signedAt !== null)
+          .sort()
+          .at(-1) ?? null
+      : null;
+
+  return {
+    ...sheet,
+    course: courseEntries.map((entry) => entry.name).join(" / ") || sheet.course,
+    courseEntries,
+    teacherName: teacherNames.join(" / ") || sheet.teacherName,
+    signedAt: fullSignedAt
+  };
+}
+
 async function fetchAttendanceSheet(classId: string, day: string, hour: number) {
   const params = new URLSearchParams({
     classId,
@@ -105,7 +172,12 @@ async function fetchAttendanceSheet(classId: string, day: string, hour: number) 
   return (await response.json()) as AttendanceSheetPayload;
 }
 
-async function persistAttendanceSheet(classId: string, sheet: AttendanceSheetPayload, action: SaveAttendanceAction) {
+async function persistAttendanceSheet(
+  classId: string,
+  sheet: AttendanceSheetPayload,
+  action: SaveAttendanceAction,
+  signaturePasswords?: Record<string, string>
+) {
   const response = await fetch("/api/attendance", {
     method: "PUT",
     headers: {
@@ -114,12 +186,14 @@ async function persistAttendanceSheet(classId: string, sheet: AttendanceSheetPay
     body: JSON.stringify({
       ...sheet,
       classId,
-      action
+      action,
+      signaturePasswords
     })
   });
 
   if (!response.ok) {
-    throw new Error("Η βάση δεν αποθήκευσε το απουσιολόγιο.");
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Η βάση δεν αποθήκευσε το απουσιολόγιο.");
   }
 
   return (await response.json()) as AttendanceSheetPayload;
@@ -146,6 +220,8 @@ export function AttendanceBoard({
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>("unknown");
   const [isSyncing, setIsSyncing] = useState(false);
   const [message, setMessage] = useState("Δεν υπάρχουν μη αποθηκευμένες αλλαγές.");
+  const [isSignatureDialogOpen, setIsSignatureDialogOpen] = useState(false);
+  const [signaturePasswords, setSignaturePasswords] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const storedSheets = readStoredSheets();
@@ -200,10 +276,8 @@ export function AttendanceBoard({
   const selectedSheetKey = getSheetKey(selectedClassId, selectedDay, selectedHour);
   const currentSheet = sheets[selectedSheetKey] ?? createDefaultSheet(selectedDay, selectedHour);
   const currentClass = availableClasses.find((classRecord) => classRecord.id === selectedClassId) ?? availableClasses[0] ?? demoClass;
-  const courseOptions = useMemo(() => {
-    const storedCourses = currentSheet.courses && currentSheet.courses.length > 0 ? currentSheet.courses : demoCourses;
-    return Array.from(new Set([currentSheet.course, ...storedCourses, "ΚΕΝΟ"].filter(Boolean)));
-  }, [currentSheet.course, currentSheet.courses]);
+  const courseOptions = useMemo(() => fallbackCourseOptions(currentSheet), [currentSheet]);
+  const currentCourseEntries = useMemo(() => normalizedCourseEntries(currentSheet), [currentSheet]);
 
   const selectedDayLabel = useMemo(
     () => weekDays.find((day) => day.value === selectedDay)?.label ?? "Δευτέρα",
@@ -215,8 +289,13 @@ export function AttendanceBoard({
   );
   const absentCount = currentSheet.students.filter((student) => student.absent).length;
   const isTeacher = mode === "teacher";
-  const isSigned = currentSheet.signedAt !== null;
-  const canEdit = !isSigned || isTeacher;
+  const isClassTablet = mode === "tablet" && !isAdmin;
+  const signedCourseCount = currentCourseEntries.filter((entry) => entry.signedAt).length;
+  const hasAnySignature = signedCourseCount > 0;
+  const isSigned = currentCourseEntries.length > 0 && signedCourseCount === currentCourseEntries.length;
+  const signatureStatus = isSigned ? "Υπογεγραμμένο" : hasAnySignature ? `Μερική (${signedCourseCount}/${currentCourseEntries.length})` : "Ανοιχτό";
+  const canEdit = !hasAnySignature || isTeacher;
+  const canSign = (isTeacher || isClassTablet) && !isSigned && !isSyncing;
   const signedAtDate = currentSheet.signedAt ? new Date(currentSheet.signedAt) : null;
   const savedAtDate = currentSheet.savedAt ? new Date(currentSheet.savedAt) : null;
   const selectedStudent = currentSheet.students.find((student) => student.id === selectedStudentId) ?? null;
@@ -256,11 +335,11 @@ export function AttendanceBoard({
 
   async function saveDraft() {
     const now = new Date();
-    const optimisticSheet = {
+    const optimisticSheet = sheetWithCourseEntries({
       ...currentSheet,
       savedAt: now.toISOString(),
       dirty: false
-    };
+    }, currentCourseEntries);
     const nextSheets = {
       ...sheets,
       [selectedSheetKey]: optimisticSheet
@@ -290,30 +369,22 @@ export function AttendanceBoard({
     }
   }
 
-  async function signAttendanceSheet() {
-    if (!isTeacher) {
-      setMessage("Μόνο εκπαιδευτικός μπορεί να υπογράψει το απουσιολόγιο.");
+  async function signAttendanceSheet(passwords?: Record<string, string>) {
+    if (!isTeacher && !isClassTablet) {
+      setMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ξεκινήσει υπογραφή.");
       return;
     }
 
     const now = new Date();
-    const optimisticSheet = {
+    const sheetToSign = sheetWithCourseEntries({
       ...currentSheet,
-      signedAt: now.toISOString(),
       savedAt: now.toISOString(),
       dirty: false
-    };
-    const nextSheets = {
-      ...sheets,
-      [selectedSheetKey]: optimisticSheet
-    };
-
-    setSheets(nextSheets);
-    writeStoredSheets(nextSheets);
+    }, currentCourseEntries);
     setIsSyncing(true);
 
     try {
-      const persistedSheet = await persistAttendanceSheet(selectedClassId, optimisticSheet, "sign");
+      const persistedSheet = await persistAttendanceSheet(selectedClassId, sheetToSign, "sign", passwords);
       setSheets((currentSheets) => {
         const syncedSheets = {
           ...currentSheets,
@@ -323,21 +394,94 @@ export function AttendanceBoard({
         return syncedSheets;
       });
       setDatabaseStatus("ready");
-      setMessage(`Το απουσιολόγιο υπογράφηκε στη βάση από ${currentSheet.teacherName} στις ${formatSavedAt(now)}.`);
-    } catch {
-      setDatabaseStatus("fallback");
-      setMessage(`Το απουσιολόγιο υπογράφηκε μόνο στη συσκευή από ${currentSheet.teacherName} στις ${formatSavedAt(now)}.`);
+      setIsSignatureDialogOpen(false);
+      setSignaturePasswords({});
+      setMessage(`Το απουσιολόγιο υπογράφηκε στη βάση στις ${formatSavedAt(now)}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Αποτυχία υπογραφής απουσιολογίου.");
     } finally {
       setIsSyncing(false);
     }
   }
 
-  function setNoCourse() {
+  function updateCourseEntry(position: number, courseId: string) {
+    const selectedOption = courseOptions.find((option) => option.courseId === courseId);
+    if (!selectedOption) {
+      return;
+    }
+
+    const nextEntries = currentCourseEntries.map((entry, index) =>
+      index === position
+        ? {
+            ...selectedOption,
+            position,
+            signedAt: null
+          }
+        : entry
+    );
     updateCurrentSheet((sheet) => ({
-      ...sheet,
-      course: "ΚΕΝΟ",
+      ...sheetWithCourseEntries(sheet, nextEntries),
       savedAt: null,
-      signedAt: sheet.signedAt && isTeacher ? null : sheet.signedAt,
+      dirty: true
+    }));
+    setMessage("Το μάθημα και ο εκπαιδευτικός ενημερώθηκαν αυτόματα.");
+  }
+
+  function addCourseEntry() {
+    if (currentCourseEntries.length >= 2) {
+      setMessage("Μπορούν να υπάρχουν μέχρι δύο μαθήματα στην ίδια ώρα.");
+      return;
+    }
+
+    const existingCourseIds = new Set(currentCourseEntries.map((entry) => entry.courseId));
+    const nextOption = courseOptions.find((option) => !existingCourseIds.has(option.courseId));
+    if (!nextOption) {
+      setMessage("Δεν υπάρχει άλλο διαθέσιμο μάθημα για προσθήκη.");
+      return;
+    }
+
+    const nextEntries = [
+      ...currentCourseEntries,
+      {
+        ...nextOption,
+        position: currentCourseEntries.length,
+        signedAt: null
+      }
+    ];
+    updateCurrentSheet((sheet) => ({
+      ...sheetWithCourseEntries(sheet, nextEntries),
+      savedAt: null,
+      dirty: true
+    }));
+    setMessage("Προστέθηκε δεύτερο μάθημα για την ώρα.");
+  }
+
+  function removeCourseEntry(position: number) {
+    if (currentCourseEntries.length <= 1) {
+      return;
+    }
+
+    const nextEntries = currentCourseEntries
+      .filter((_, index) => index !== position)
+      .map((entry, index) => ({ ...entry, position: index }));
+    updateCurrentSheet((sheet) => ({
+      ...sheetWithCourseEntries(sheet, nextEntries),
+      savedAt: null,
+      dirty: true
+    }));
+    setMessage("Αφαιρέθηκε το δεύτερο μάθημα της ώρας.");
+  }
+
+  function setNoCourse() {
+    const noCourseOption = courseOptions.find((option) => option.name === "ΚΕΝΟ");
+    if (!noCourseOption) {
+      setMessage("Δεν υπάρχει μάθημα ΚΕΝΟ στο τμήμα.");
+      return;
+    }
+
+    updateCurrentSheet((sheet) => ({
+      ...sheetWithCourseEntries(sheet, [{ ...noCourseOption, position: 0, signedAt: null }]),
+      savedAt: null,
       dirty: true
     }));
     setMessage("Ορίστηκε ΚΕΝΟ για την επιλεγμένη ώρα.");
@@ -345,7 +489,10 @@ export function AttendanceBoard({
 
   function reopenSignedSheet() {
     updateCurrentSheet((sheet) => ({
-      ...sheet,
+      ...sheetWithCourseEntries(
+        sheet,
+        normalizedCourseEntries(sheet).map((entry) => ({ ...entry, signedAt: null }))
+      ),
       signedAt: null,
       savedAt: null,
       dirty: true
@@ -353,14 +500,27 @@ export function AttendanceBoard({
     setMessage("Το απουσιολόγιο άνοιξε ξανά για διόρθωση από εκπαιδευτικό.");
   }
 
-  function clearCurrentSheet() {
-    const nextSheets = {
-      ...sheets,
-      [selectedSheetKey]: createDefaultSheet(selectedDay, selectedHour)
-    };
-    setSheets(nextSheets);
-    writeStoredSheets(nextSheets);
-    setMessage("Το απουσιολόγιο της επιλεγμένης ώρας επανήλθε στην αρχική κατάσταση.");
+  async function clearCurrentSheet() {
+    setIsSyncing(true);
+
+    try {
+      const payload = await fetchAttendanceSheet(selectedClassId, selectedDay, selectedHour);
+      setSheets((currentSheets) => {
+        const nextSheets = {
+          ...currentSheets,
+          [selectedSheetKey]: payload
+        };
+        writeStoredSheets(nextSheets);
+        return nextSheets;
+      });
+      setDatabaseStatus("ready");
+      setMessage("Η ώρα επαναφορτώθηκε από τη βάση δεδομένων.");
+    } catch {
+      setDatabaseStatus("fallback");
+      setMessage("Δεν έγινε επαναφορά, γιατί η βάση δεν απάντησε. Τα τρέχοντα δεδομένα έμειναν όπως ήταν.");
+    } finally {
+      setIsSyncing(false);
+    }
   }
 
   async function logout() {
@@ -369,7 +529,7 @@ export function AttendanceBoard({
   }
 
   return (
-    <main className="app-shell">
+    <main className={isClassTablet ? "app-shell tablet-shell" : "app-shell"}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">ΣΧ</div>
@@ -392,7 +552,8 @@ export function AttendanceBoard({
         </button>
       </header>
 
-      <div className="workspace">
+      <div className={isClassTablet ? "workspace tablet-workspace" : "workspace"}>
+        {isClassTablet ? null : (
         <nav className="sidebar" aria-label="Κύρια πλοήγηση">
           <button className="nav-button active">
             <ClipboardCheck size={18} />
@@ -431,14 +592,17 @@ export function AttendanceBoard({
             Εκτυπώσεις
           </Link>
         </nav>
+        )}
 
         <section className="main-grid">
           <div className="page-header">
             <div>
               <h2>Απουσιολόγιο τάξης {currentClass.name}</h2>
-              <p>
-                Σχολικό έτος {currentClass.schoolYear}, Τάξη {currentClass.grade}. Το τάμπλετ της τάξης ανοίγει απευθείας αυτή την οθόνη.
-              </p>
+              {isClassTablet ? null : (
+                <p>
+                  Σχολικό έτος {currentClass.schoolYear}, Τάξη {currentClass.grade}. Το τάμπλετ της τάξης ανοίγει απευθείας αυτή την οθόνη.
+                </p>
+              )}
             </div>
             <div className="status-row">
               <span className="pill">
@@ -452,6 +616,7 @@ export function AttendanceBoard({
             </div>
           </div>
 
+          {isClassTablet ? null : (
           <section className="panel mode-panel">
             <div className="mode-control" aria-label="Επιλογή ρόλου χρήστη">
               <span className={mode === "teacher" ? "mode-button active" : "mode-button"}>Εκπαιδευτικός</span>
@@ -463,6 +628,7 @@ export function AttendanceBoard({
             </span>
             <span className="sync-pill ready">Χρήστης: {username}</span>
           </section>
+          )}
 
           {isAdmin ? (
             <section className="panel admin-class-switch">
@@ -498,7 +664,7 @@ export function AttendanceBoard({
             </div>
             <div className="panel metric">
               <span>Υπογραφή</span>
-              <strong>{isSigned ? "Υπογεγραμμένο" : "Ανοιχτό"}</strong>
+              <strong>{signatureStatus}</strong>
             </div>
             <div className="panel metric">
               <span>Κατάσταση</span>
@@ -544,48 +710,56 @@ export function AttendanceBoard({
                 </select>
               </div>
 
-              <div className="field">
-                <label htmlFor="course">Μάθημα</label>
-                <select
-                  id="course"
-                  value={currentSheet.course}
-                  disabled={!canEdit}
-                  onChange={(event) => {
-                    updateCurrentSheet((sheet) => ({
-                      ...sheet,
-                      course: event.target.value,
-                      savedAt: null,
-                      signedAt: sheet.signedAt && isTeacher ? null : sheet.signedAt,
-                      dirty: true
-                    }));
-                    setMessage("Υπάρχουν μη αποθηκευμένες αλλαγές.");
-                  }}
-                >
-                  {courseOptions.map((course) => (
-                    <option key={course} value={course}>
-                      {course}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor="teacher">Εκπαιδευτικός</label>
-                <input
-                  id="teacher"
-                  value={currentSheet.teacherName}
-                  disabled={!canEdit}
-                  onChange={(event) => {
-                    updateCurrentSheet((sheet) => ({
-                      ...sheet,
-                      teacherName: event.target.value,
-                      savedAt: null,
-                      signedAt: sheet.signedAt && isTeacher ? null : sheet.signedAt,
-                      dirty: true
-                    }));
-                    setMessage("Υπάρχουν μη αποθηκευμένες αλλαγές.");
-                  }}
-                />
+              <div className="field course-picker-field">
+                <label>Μάθημα και εκπαιδευτικός</label>
+                <div className="course-entry-list">
+                  {currentCourseEntries.map((entry, index) => {
+                    const selectedCourseIds = new Set(currentCourseEntries.map((courseEntry) => courseEntry.courseId));
+                    return (
+                      <div className="course-entry-row" key={`${entry.courseId}-${index}`}>
+                        <select
+                          aria-label={`Μάθημα ${index + 1}`}
+                          disabled={!canEdit || Boolean(entry.signedAt)}
+                          value={entry.courseId}
+                          onChange={(event) => updateCourseEntry(index, event.target.value)}
+                        >
+                          {courseOptions
+                            .filter((option) => option.courseId === entry.courseId || !selectedCourseIds.has(option.courseId))
+                            .map((option) => (
+                              <option key={option.courseId} value={option.courseId}>
+                                {option.name}
+                              </option>
+                            ))}
+                        </select>
+                        <span className="course-teacher-name">{entry.teacherName}</span>
+                        {index === 0 && currentCourseEntries.length < 2 ? (
+                          <button
+                            aria-label="Προσθήκη δεύτερου μαθήματος"
+                            className="icon-button"
+                            disabled={!canEdit}
+                            onClick={addCourseEntry}
+                            title="Προσθήκη δεύτερου μαθήματος"
+                            type="button"
+                          >
+                            <Plus size={18} />
+                          </button>
+                        ) : null}
+                        {index === 1 ? (
+                          <button
+                            aria-label="Αφαίρεση δεύτερου μαθήματος"
+                            className="icon-button"
+                            disabled={!canEdit || Boolean(entry.signedAt)}
+                            onClick={() => removeCourseEntry(index)}
+                            title="Αφαίρεση δεύτερου μαθήματος"
+                            type="button"
+                          >
+                            <Minus size={18} />
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </section>
@@ -595,7 +769,11 @@ export function AttendanceBoard({
               <h3>Μαθητές</h3>
               <span className={isSigned ? "pill signed-pill" : "pill"}>
                 {isSigned ? <LockKeyhole size={15} /> : <CheckCircle2 size={15} />}
-                {signedAtDate ? `Υπογραφή ${formatSavedAt(signedAtDate)}` : "Ο εκπαιδευτικός υπογράφει μετά τον έλεγχο"}
+                {signedAtDate
+                  ? `Υπογραφή ${formatSavedAt(signedAtDate)}`
+                  : hasAnySignature
+                    ? `Μερική υπογραφή ${signedCourseCount}/${currentCourseEntries.length}`
+                    : "Ο εκπαιδευτικός υπογράφει μετά τον έλεγχο"}
               </span>
             </div>
 
@@ -671,10 +849,21 @@ export function AttendanceBoard({
                   Άνοιγμα για διόρθωση
                 </button>
               ) : null}
-              <button className="secondary-button" disabled={!canEdit} onClick={clearCurrentSheet} type="button">
+              <button className="secondary-button" disabled={!canEdit || isSyncing} onClick={() => void clearCurrentSheet()} type="button">
                 Επαναφορά ώρας
               </button>
-              <button className="primary-button" disabled={!isTeacher || isSigned || isSyncing} onClick={signAttendanceSheet} type="button">
+              <button
+                className="primary-button"
+                disabled={!canSign}
+                onClick={() => {
+                  if (isClassTablet) {
+                    setIsSignatureDialogOpen(true);
+                    return;
+                  }
+                  void signAttendanceSheet();
+                }}
+                type="button"
+              >
                 <CheckCircle2 size={18} />
                 Υπογραφή απουσιολογίου
               </button>
@@ -682,6 +871,73 @@ export function AttendanceBoard({
           </section>
         </section>
       </div>
+
+      {isSignatureDialogOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            className="signature-modal"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void signAttendanceSheet(signaturePasswords);
+            }}
+          >
+            <div>
+              <h3>Υπογραφή απουσιολογίου</h3>
+              <p>Κάθε εκπαιδευτικός πληκτρολογεί μόνο τον δικό του κωδικό.</p>
+            </div>
+            <div className="signature-course-list">
+              {currentCourseEntries.map((entry, index) => (
+                <div className="signature-course-row" key={`${entry.courseId}-${index}`}>
+                  <div>
+                    <strong>{entry.teacherName}</strong>
+                    <span>{entry.name}</span>
+                  </div>
+                  {entry.signedAt ? (
+                    <span className="sync-pill ready">Υπογεγραμμένο</span>
+                  ) : (
+                    <input
+                      aria-label={`Κωδικός εκπαιδευτικού ${entry.teacherName}`}
+                      autoFocus={index === 0}
+                      minLength={4}
+                      onChange={(event) =>
+                        setSignaturePasswords((currentPasswords) => ({
+                          ...currentPasswords,
+                          [entry.courseId]: event.target.value
+                        }))
+                      }
+                      placeholder="Κωδικός"
+                      type="password"
+                      value={signaturePasswords[entry.courseId] ?? ""}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setIsSignatureDialogOpen(false);
+                  setSignaturePasswords({});
+                }}
+                type="button"
+              >
+                Άκυρο
+              </button>
+              <button
+                className="primary-button"
+                disabled={
+                  isSyncing ||
+                  !currentCourseEntries.some((entry) => !entry.signedAt && (signaturePasswords[entry.courseId]?.length ?? 0) >= 4)
+                }
+                type="submit"
+              >
+                Υπογραφή
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </main>
   );
 }

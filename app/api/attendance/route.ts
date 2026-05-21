@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { WeekDay } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import type { AttendanceSheetPayload, SaveAttendanceRequest } from "@/lib/attendance-types";
+import { verifyPassword } from "@/lib/password";
+import type { AttendanceCourseEntry, AttendanceCourseOption, AttendanceSheetPayload, SaveAttendanceRequest } from "@/lib/attendance-types";
 
 function isWeekDay(value: string | null): value is WeekDay {
   return value !== null && Object.values(WeekDay).includes(value as WeekDay);
@@ -11,6 +12,22 @@ function isWeekDay(value: string | null): value is WeekDay {
 function courseAutoAa(courseName: string) {
   const hash = Array.from(courseName).reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 100000, 17);
   return `AUTO-${String(hash).padStart(5, "0")}`;
+}
+
+function teacherName(teacher: { name: string; surname: string } | null | undefined) {
+  return teacher ? `${teacher.name} ${teacher.surname}` : "Δεν έχει οριστεί εκπαιδευτικός";
+}
+
+function fullySignedAt(courseEntries: AttendanceCourseEntry[]) {
+  if (courseEntries.length === 0 || courseEntries.some((entry) => !entry.signedAt)) {
+    return null;
+  }
+
+  return courseEntries
+    .map((entry) => entry.signedAt)
+    .filter((signedAt): signedAt is string => signedAt !== null)
+    .sort()
+    .at(-1) ?? null;
 }
 
 async function buildSheetPayload(classId: string, day: WeekDay, hour: number): Promise<AttendanceSheetPayload> {
@@ -22,6 +39,13 @@ async function buildSheetPayload(classId: string, day: WeekDay, hour: number): P
         orderBy: [{ surname: "asc" }, { name: "asc" }]
       },
       courses: {
+        include: {
+          teachers: {
+            include: {
+              teacher: true
+            }
+          }
+        },
         orderBy: [{ isNoCourse: "asc" }, { name: "asc" }]
       }
     }
@@ -41,7 +65,22 @@ async function buildSheetPayload(classId: string, day: WeekDay, hour: number): P
     },
     include: {
       absences: true,
-      course: true
+      course: true,
+      courses: {
+        include: {
+          course: {
+            include: {
+              teachers: {
+                include: {
+                  teacher: true
+                }
+              }
+            }
+          },
+          teacher: true
+        },
+        orderBy: { position: "asc" }
+      }
     }
   });
 
@@ -65,24 +104,79 @@ async function buildSheetPayload(classId: string, day: WeekDay, hour: number): P
     orderBy: [{ course: { name: "asc" } }]
   });
 
-  const scheduledCourseNames = scheduledSlots.map((slot) => slot.course.name);
-  const scheduledTeacherNames = scheduledSlots
-    .map((slot) => slot.course.teachers[0]?.teacher)
-    .filter(Boolean)
-    .map((teacher) => `${teacher!.name} ${teacher!.surname}`);
+  const courseOptions: AttendanceCourseOption[] = classRecord.courses.map((course) => {
+    const teacher = course.teachers[0]?.teacher;
+    return {
+      courseId: course.id,
+      name: course.name,
+      teacherId: teacher?.id ?? null,
+      teacherName: teacherName(teacher)
+    };
+  });
   const fallbackCourse = classRecord.courses.find((course) => !course.isNoCourse) ?? classRecord.courses[0];
   const responsibleTeacher = classRecord.responsibleTeacher
-    ? `${classRecord.responsibleTeacher.name} ${classRecord.responsibleTeacher.surname}`
+    ? teacherName(classRecord.responsibleTeacher)
     : "Μαρία Παπαδοπούλου";
-  const defaultTeacher = scheduledTeacherNames.length > 0 ? Array.from(new Set(scheduledTeacherNames)).join(" / ") : responsibleTeacher;
   const absentStudentIds = new Set(sheet?.absences.filter((absence) => absence.absent).map((absence) => absence.studentId) ?? []);
+  const storedCourseEntries: AttendanceCourseEntry[] =
+    sheet?.courses.map((entry) => ({
+      position: entry.position,
+      courseId: entry.courseId,
+      name: entry.course.name,
+      teacherId: entry.teacherId,
+      teacherName: entry.teacher ? teacherName(entry.teacher) : teacherName(entry.course.teachers[0]?.teacher),
+      signedAt: entry.signedAt?.toISOString() ?? null
+    })) ?? [];
+  const scheduledCourseEntries: AttendanceCourseEntry[] = scheduledSlots.slice(0, 2).map((slot, index) => {
+    const teacher = slot.course.teachers[0]?.teacher;
+    return {
+      position: index,
+      courseId: slot.course.id,
+      name: slot.course.name,
+      teacherId: teacher?.id ?? null,
+      teacherName: teacherName(teacher),
+      signedAt: null
+    };
+  });
+  const legacyCourseOption =
+    sheet?.course && !storedCourseEntries.length
+      ? courseOptions.find((option) => option.courseId === sheet.courseId) ?? {
+          courseId: sheet.courseId,
+          name: sheet.course.name,
+          teacherId: sheet.signedByTeacherId ?? null,
+          teacherName: sheet.teacherName
+        }
+      : null;
+  const fallbackCourseEntry = fallbackCourse
+    ? {
+        position: 0,
+        courseId: fallbackCourse.id,
+        name: fallbackCourse.name,
+        teacherId: fallbackCourse.teachers[0]?.teacher.id ?? null,
+        teacherName: teacherName(fallbackCourse.teachers[0]?.teacher),
+        signedAt: null
+      }
+    : null;
+  const courseEntries =
+    storedCourseEntries.length > 0
+      ? storedCourseEntries
+      : legacyCourseOption
+        ? [{ ...legacyCourseOption, position: 0, signedAt: sheet?.signedAt?.toISOString() ?? null }]
+        : scheduledCourseEntries.length > 0
+          ? scheduledCourseEntries
+          : fallbackCourseEntry
+            ? [fallbackCourseEntry]
+            : [];
+  const teacherNames = Array.from(new Set(courseEntries.map((entry) => entry.teacherName).filter(Boolean)));
 
   return {
     day,
     hour,
-    course: scheduledCourseNames.length > 0 ? scheduledCourseNames.join(" / ") : sheet?.course.name ?? fallbackCourse?.name ?? "ΚΕΝΟ",
+    course: courseEntries.map((entry) => entry.name).join(" / ") || sheet?.course.name || fallbackCourse?.name || "ΚΕΝΟ",
     courses: classRecord.courses.map((course) => course.name),
-    teacherName: sheet?.teacherName ?? defaultTeacher,
+    courseOptions,
+    courseEntries,
+    teacherName: teacherNames.length > 0 ? teacherNames.join(" / ") : sheet?.teacherName ?? responsibleTeacher,
     students: classRecord.students.map((student) => ({
       id: student.id,
       code: student.am,
@@ -90,7 +184,7 @@ async function buildSheetPayload(classId: string, day: WeekDay, hour: number): P
       surname: student.surname,
       absent: absentStudentIds.has(student.id)
     })),
-    signedAt: sheet?.signedAt?.toISOString() ?? null,
+    signedAt: fullySignedAt(courseEntries) ?? sheet?.signedAt?.toISOString() ?? null,
     savedAt: sheet?.savedAt?.toISOString() ?? null,
     dirty: false
   };
@@ -142,26 +236,49 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Δεν υπάρχει πρόσβαση σε αυτή την τάξη." }, { status: 403 });
   }
 
-  if (session.role === "CLASS_TABLET" && body.action === "sign") {
-    return NextResponse.json({ error: "Το τάμπλετ τάξης δεν μπορεί να υπογράψει." }, { status: 403 });
-  }
-
   try {
     const day = body.day;
     const now = new Date();
-    const scheduledSlots = await prisma.scheduleSlot.findMany({
-      where: {
-        classId: body.classId,
-        day,
-        hour: body.hour
-      },
-      include: {
-        course: true
+    const requestedCourseIds = Array.from(
+      new Set(
+        (body.courseEntries ?? [])
+          .slice(0, 2)
+          .map((entry) => entry.courseId)
+          .filter(Boolean)
+      )
+    );
+
+    if ((body.courseEntries?.length ?? 0) > 2 || requestedCourseIds.length > 2) {
+      return NextResponse.json({ error: "Μπορούν να δηλωθούν μέχρι δύο μαθήματα για την ίδια ώρα." }, { status: 400 });
+    }
+
+    const courseInclude = {
+      teachers: {
+        include: {
+          teacher: {
+            include: {
+              user: true
+            }
+          }
+        }
       }
-    });
-    const course =
-      scheduledSlots[0]?.course ??
-      (await prisma.course.upsert({
+    };
+    let courseRecords = requestedCourseIds.length
+      ? await prisma.course.findMany({
+          where: {
+            id: { in: requestedCourseIds },
+            classId: body.classId
+          },
+          include: courseInclude
+        })
+      : [];
+
+    if (requestedCourseIds.length > 0 && courseRecords.length !== requestedCourseIds.length) {
+      return NextResponse.json({ error: "Τα μαθήματα πρέπει να ανήκουν στο τμήμα του απουσιολογίου." }, { status: 400 });
+    }
+
+    if (courseRecords.length === 0) {
+      const fallbackCourse = await prisma.course.upsert({
         where: {
           classId_name: {
             classId: body.classId,
@@ -176,14 +293,81 @@ export async function PUT(request: NextRequest) {
           classId: body.classId,
           name: body.course,
           isNoCourse: body.course === "ΚΕΝΟ"
-        }
-      }));
+        },
+        include: courseInclude
+      });
+      courseRecords = [fallbackCourse];
+    }
 
-    const teacher = await prisma.teacher.findFirst({
-      where: {
-        homeClassId: body.classId
+    const courseById = new Map(courseRecords.map((course) => [course.id, course]));
+    const selectedCourseIds = requestedCourseIds.length > 0 ? requestedCourseIds : [courseRecords[0].id];
+    const selectedEntries = selectedCourseIds.map((courseId, position) => {
+      const course = courseById.get(courseId);
+      if (!course) {
+        throw new Error("Το μάθημα δεν βρέθηκε.");
       }
+
+      const teacher = course.teachers[0]?.teacher ?? null;
+      const requestedEntry = body.courseEntries?.find((entry) => entry.courseId === courseId);
+      return {
+        course,
+        teacher,
+        position,
+        signedAt: requestedEntry?.signedAt ? new Date(requestedEntry.signedAt) : null
+      };
     });
+    const signatureByCourseId = new Map<string, Date>();
+
+    let signingTeacher =
+      body.action === "sign" && (session.role === "TEACHER" || session.role === "ADMIN")
+        ? await prisma.teacher.findUnique({ where: { userId: session.userId } })
+        : null;
+
+    if (body.action === "sign" && session.role === "CLASS_TABLET") {
+      for (const entry of selectedEntries) {
+        const password = (body.signaturePasswords?.[entry.course.id] ?? body.signaturePassword ?? "").trim();
+        if (!password) {
+          continue;
+        }
+
+        if (!entry.teacher) {
+          return NextResponse.json({ error: `Δεν έχει οριστεί εκπαιδευτικός για το μάθημα ${entry.course.name}.` }, { status: 403 });
+        }
+
+        if (!verifyPassword(password, entry.teacher.user.passwordHash)) {
+          return NextResponse.json(
+            { error: `Ο κωδικός δεν αντιστοιχεί στον/στην εκπαιδευτικό ${teacherName(entry.teacher)}.` },
+            { status: 403 }
+          );
+        }
+
+        signatureByCourseId.set(entry.course.id, now);
+        signingTeacher = entry.teacher;
+      }
+
+      if (signatureByCourseId.size === 0) {
+        return NextResponse.json({ error: "Συμπληρώστε τουλάχιστον έναν κωδικό εκπαιδευτικού." }, { status: 400 });
+      }
+    }
+
+    if (body.action === "sign" && session.role !== "CLASS_TABLET" && !signingTeacher) {
+      return NextResponse.json({ error: "Δεν βρέθηκε εκπαιδευτικός για υπογραφή." }, { status: 403 });
+    }
+
+    if (body.action === "sign" && signingTeacher && session.role !== "CLASS_TABLET") {
+      for (const entry of selectedEntries) {
+        if (entry.teacher?.id === signingTeacher.id) {
+          signatureByCourseId.set(entry.course.id, now);
+        }
+      }
+
+      if (signatureByCourseId.size === 0) {
+        return NextResponse.json({ error: "Ο συνδεδεμένος εκπαιδευτικός δεν αντιστοιχεί στα μαθήματα της ώρας." }, { status: 403 });
+      }
+    }
+
+    const sheetTeacherName = Array.from(new Set(selectedEntries.map((entry) => teacherName(entry.teacher)))).join(" / ");
+    let sheetCourseRows: Array<{ signedAt: Date | null; teacherId: string | null }> = [];
 
     await prisma.$transaction(async (tx) => {
       const sheet = await tx.attendanceSheet.upsert({
@@ -195,21 +379,70 @@ export async function PUT(request: NextRequest) {
           }
         },
         update: {
-          courseId: course.id,
-          teacherName: body.teacherName,
+          courseId: selectedEntries[0].course.id,
+          teacherName: sheetTeacherName,
           savedAt: now,
-          signedAt: body.action === "sign" ? now : body.signedAt ? new Date(body.signedAt) : null,
-          signedByTeacherId: body.action === "sign" ? teacher?.id ?? null : null
+          signedAt: null,
+          signedByTeacherId: null
         },
         create: {
           classId: body.classId,
-          courseId: course.id,
+          courseId: selectedEntries[0].course.id,
           day,
           hour: body.hour,
-          teacherName: body.teacherName,
+          teacherName: sheetTeacherName,
           savedAt: now,
-          signedAt: body.action === "sign" ? now : body.signedAt ? new Date(body.signedAt) : null,
-          signedByTeacherId: body.action === "sign" ? teacher?.id ?? null : null
+          signedAt: null,
+          signedByTeacherId: null
+        }
+      });
+
+      const previousCourseRows = await tx.attendanceSheetCourse.findMany({
+        where: { sheetId: sheet.id }
+      });
+      const previousCourseRowByCourseId = new Map(previousCourseRows.map((entry) => [entry.courseId, entry]));
+
+      await tx.attendanceSheetCourse.deleteMany({
+        where: { sheetId: sheet.id }
+      });
+
+      sheetCourseRows = selectedEntries.map((entry) => {
+        const signedAt =
+          signatureByCourseId.get(entry.course.id) ??
+          previousCourseRowByCourseId.get(entry.course.id)?.signedAt ??
+          entry.signedAt ??
+          null;
+
+        return {
+          signedAt,
+          teacherId: entry.teacher?.id ?? null
+        };
+      });
+
+      await tx.attendanceSheetCourse.createMany({
+        data: selectedEntries.map((entry, index) => ({
+          sheetId: sheet.id,
+          courseId: entry.course.id,
+          teacherId: entry.teacher?.id ?? null,
+          position: index,
+          signedAt: sheetCourseRows[index].signedAt
+        }))
+      });
+
+      const fullSignedAt =
+        sheetCourseRows.length > 0 && sheetCourseRows.every((entry) => entry.signedAt)
+          ? sheetCourseRows
+              .map((entry) => entry.signedAt)
+              .filter((signedAt): signedAt is Date => signedAt !== null)
+              .sort((first, second) => first.getTime() - second.getTime())
+              .at(-1) ?? null
+          : null;
+
+      await tx.attendanceSheet.update({
+        where: { id: sheet.id },
+        data: {
+          signedAt: fullSignedAt,
+          signedByTeacherId: fullSignedAt && selectedEntries.length === 1 ? sheetCourseRows[0].teacherId : null
         }
       });
 
