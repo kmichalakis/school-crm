@@ -838,6 +838,49 @@ function generatedImportPassword(index: number) {
   return `School${2027 + index}!`;
 }
 
+function excelSerialToDate(serial: number) {
+  const parsed = XLSX.SSF.parse_date_code(serial);
+  if (!parsed) {
+    return null;
+  }
+
+  return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+}
+
+function importedDate(value: string, fallback: Date, label: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return fallback;
+  }
+
+  const numericValue = Number(normalized.replace(",", "."));
+  if (Number.isFinite(numericValue) && numericValue >= 20000 && numericValue <= 80000) {
+    const date = excelSerialToDate(numericValue);
+    if (date) {
+      return date;
+    }
+  }
+
+  const isoMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  }
+
+  const greekMatch = normalized.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (greekMatch) {
+    const [, day, month, year] = greekMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  }
+
+  const parsedDate = new Date(normalized);
+  if (!Number.isNaN(parsedDate.getTime()) && parsedDate.getUTCFullYear() >= 1900 && parsedDate.getUTCFullYear() <= 2200) {
+    return new Date(Date.UTC(parsedDate.getUTCFullYear(), parsedDate.getUTCMonth(), parsedDate.getUTCDate()));
+  }
+
+  throw new Error(`Η ημερομηνία "${normalized}" στο πεδίο "${label}" δεν αναγνωρίζεται. Χρησιμοποιήστε ημερομηνία Excel, yyyy-mm-dd ή dd/mm/yyyy.`);
+}
+
 function schoolYearDatesFromName(name: string) {
   const [startYear, endYear] = name.split("-").map(Number);
   const safeStartYear = Number.isFinite(startYear) ? startYear : new Date().getFullYear();
@@ -952,8 +995,8 @@ export async function importSchoolWorkbookAction(formData: FormData) {
       const dates = schoolYearDatesFromName(name);
       const startsOnText = cell(row, ["έναρξη", "startsOn"]);
       const endsOnText = cell(row, ["λήξη", "endsOn"]);
-      const startsOn = startsOnText ? new Date(startsOnText) : dates.startsOn;
-      const endsOn = endsOnText ? new Date(endsOnText) : dates.endsOn;
+      const startsOn = importedDate(startsOnText, dates.startsOn, "έναρξη");
+      const endsOn = importedDate(endsOnText, dates.endsOn, "λήξη");
       const active = excelBoolean(cell(row, ["ενεργό", "active"]));
 
       if (active) {
