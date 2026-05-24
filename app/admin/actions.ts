@@ -920,6 +920,17 @@ export async function importSchoolWorkbookAction(formData: FormData) {
     let coursesImported = 0;
     let scheduleImported = 0;
     let schoolYearsImported = 0;
+    const importedPasswordHashes = new Map<string, string>();
+    function importedPasswordHash(password: string) {
+      const cached = importedPasswordHashes.get(password);
+      if (cached) {
+        return cached;
+      }
+
+      const hashed = hashPassword(password);
+      importedPasswordHashes.set(password, hashed);
+      return hashed;
+    }
 
     await prisma.$transaction(async (tx) => {
     const teacherByAm = new Map<string, string>();
@@ -1052,16 +1063,17 @@ export async function importSchoolWorkbookAction(formData: FormData) {
       }
 
       const password = cell(row, ["κωδικός", "password"]) || generatedImportPassword(teachersImported);
+      const passwordHash = importedPasswordHash(password);
       const user = await tx.user.upsert({
         where: { username },
         update: {
           role: excelBoolean(cell(row, ["admin", "διαχειριστής"])) ? UserRole.ADMIN : UserRole.TEACHER,
-          passwordHash: hashPassword(password),
+          passwordHash,
           mustChangePassword: true
         },
         create: {
           username,
-          passwordHash: hashPassword(password),
+          passwordHash,
           role: excelBoolean(cell(row, ["admin", "διαχειριστής"])) ? UserRole.ADMIN : UserRole.TEACHER,
           mustChangePassword: true
         }
@@ -1098,16 +1110,17 @@ export async function importSchoolWorkbookAction(formData: FormData) {
       }
 
       const password = cell(row, ["κωδικός", "password"]) || generatedImportPassword(parentsImported + 100);
+      const passwordHash = importedPasswordHash(password);
       const user = await tx.user.upsert({
         where: { username },
         update: {
           role: UserRole.PARENT,
-          passwordHash: hashPassword(password),
+          passwordHash,
           mustChangePassword: true
         },
         create: {
           username,
-          passwordHash: hashPassword(password),
+          passwordHash,
           role: UserRole.PARENT,
           mustChangePassword: true
         }
@@ -1162,17 +1175,18 @@ export async function importSchoolWorkbookAction(formData: FormData) {
       const username = cell(row, ["login", "username", "χρήστης"]).toLowerCase();
       if (username) {
         const password = cell(row, ["κωδικός", "password"]) || generatedImportPassword(classesImported + 200);
+        const passwordHash = importedPasswordHash(password);
         await tx.user.upsert({
           where: { username },
           update: {
             role: UserRole.CLASS_TABLET,
             classId: classRecord.id,
-            passwordHash: hashPassword(password),
+            passwordHash,
             mustChangePassword: true
           },
           create: {
             username,
-            passwordHash: hashPassword(password),
+            passwordHash,
             role: UserRole.CLASS_TABLET,
             classId: classRecord.id,
             mustChangePassword: true

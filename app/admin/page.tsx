@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ClassYear, WeekDay } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
+import { ImportWorkbookForm } from "@/app/admin/import-workbook-form";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 import {
@@ -13,7 +14,6 @@ import {
   deleteSchoolYearDataAction,
   deleteStudentAction,
   deleteTeacherAction,
-  importSchoolWorkbookAction,
   promoteSchoolYearAction,
   setScheduleSlotAction,
   updateSchoolYearAction,
@@ -192,16 +192,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <h2>Εισαγωγή δεδομένων από Excel</h2>
               <p>Μαζική εισαγωγή τμημάτων, εκπαιδευτικών, γονέων, μαθητών, μαθημάτων και προγράμματος. Στο πρόγραμμα τα πολλά μαθήματα της ίδιας ώρας δηλώνονται με ΑΑ χωρισμένα με ;</p>
             </div>
-            <form action={importSchoolWorkbookAction} className="admin-form import-form">
-              <input name="activeSchoolYearId" type="hidden" value={activeYear?.id ?? ""} />
-              <input name="workbook" type="file" accept=".xlsx,.xls" required />
-              <a className="secondary-button" href="/admin/import-template">
-                Λήψη προτύπου Excel
-              </a>
-              <button className="primary-button" type="submit">
-                Εισαγωγή Excel
-              </button>
-            </form>
+            <ImportWorkbookForm activeSchoolYearId={activeYear?.id ?? ""} />
           </section>
 
           <section className="admin-section">

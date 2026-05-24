@@ -1193,6 +1193,7 @@ button:disabled {
 
 .import-form {
   grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: start;
 }
 
 .import-form input[type="file"] {
@@ -1201,6 +1202,22 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.import-progress {
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  border: 1px solid #b8d7d1;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--primary-dark);
+  font-size: 14px;
+}
+
+.import-progress span {
+  color: var(--muted);
 }
 
 .password-form {
