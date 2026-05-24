@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock, ClipboardCheck, Printer, ShieldCheck } from "lucide-react";
+import { CalendarClock, ClipboardCheck, MailCheck, Printer, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import type { UserRole } from "@prisma/client";
 import { LogoutButton } from "@/app/logout-button";
@@ -16,6 +16,7 @@ type AppNavigationProps = {
     | "schedule"
     | "dashboard"
     | "notifications"
+    | "control"
     | "admin";
   children: ReactNode;
   role: UserRole;
@@ -73,6 +74,10 @@ export function AppNavigation({ active, children, role, title, subtitle, userLab
               <Link className={active === "notifications" ? "nav-button active" : "nav-button"} href="/notifications">
                 <ShieldCheck size={18} />
                 Κανόνες ειδοποιήσεων
+              </Link>
+              <Link className={active === "control" ? "nav-button active" : "nav-button"} href="/control">
+                <MailCheck size={18} />
+                Έλεγχος
               </Link>
               <Link className={active === "schedule" ? "nav-button active" : "nav-button"} href="/schedule">
                 <CalendarClock size={18} />

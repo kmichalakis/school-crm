@@ -42,6 +42,9 @@ app/
     actions.ts                     Server actions admin και Excel import
     import-template/route.ts       Δημιουργία προτύπου Excel
   calendar/page.tsx                Ημερολόγιο εργάσιμων ημερών
+  control/
+    page.tsx                       Admin έλεγχος ενημερώσεων και μοτίβων
+    actions.ts                     Αποστολή/ουρά email πρώτης ώρας
   parent/
     page.tsx                       Πύλη γονέα
     absences-report/page.tsx       Εκτυπώσιμη αναφορά απουσιών γονέα
@@ -107,6 +110,7 @@ NEXTAUTH_SECRET=τυχαίο-μεγάλο-secret
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ισχυρός-αρχικός-κωδικός
 EMAIL_FROM=attendance@example.edu
+RESEND_API_KEY=προαιρετικό-api-key-για-πραγματική-αποστολή-email
 ```
 
 Σημαντικά:
@@ -114,6 +118,7 @@ EMAIL_FROM=attendance@example.edu
 - Το `DATABASE_URL` χρησιμοποιείται από Prisma.
 - Το `NEXTAUTH_SECRET` υπογράφει τα session cookies. Σε production πρέπει να είναι σταθερό και μυστικό.
 - Το `ADMIN_USERNAME` και `ADMIN_PASSWORD` χρησιμοποιούνται από `prisma/bootstrap-admin.ts`.
+- Το `RESEND_API_KEY`, αν οριστεί, επιτρέπει πραγματική αποστολή email από το μενού `Έλεγχος`. Αν λείπει, οι ενημερώσεις μένουν στην ουρά.
 
 ## 6. Scripts
 
@@ -538,6 +543,15 @@ M001;M002
 - σήμανση ως σταλμένες.
 
 Οι κανόνες email είναι ακόμα εφαρμοστικοί κανόνες/ουρά. Η πραγματική αποστολή email μπορεί να συνδεθεί σε επόμενο βήμα με πάροχο email.
+
+Το `/control` είναι admin-only σελίδα για επιχειρησιακό έλεγχο:
+
+- δημιουργεί ενημερώσεις πρώτης ώρας για συγκεκριμένη ημερομηνία,
+- στέλνει email αν υπάρχουν `RESEND_API_KEY` και `EMAIL_FROM`,
+- κρατά τις αποτυχημένες/μη ρυθμισμένες αποστολές ως `QUEUED` ειδοποιήσεις,
+- εκτελεί rules-based ανάλυση μοτίβων απουσιών ανά μαθητή, μάθημα, ώρα, ημέρα και πλήρη ημέρα.
+
+Η ανάλυση μοτίβων είναι επίτηδες deterministic στο πρώτο στάδιο. Μπορεί να επεκταθεί με AI service που θα παίρνει τα συγκεντρωτικά ευρήματα, όχι ακατέργαστα προσωπικά δεδομένα, και θα παράγει σχολιασμό/προτεραιοποίηση για τον admin.
 
 ## 18. Εκκρεμότητες υπογραφών
 

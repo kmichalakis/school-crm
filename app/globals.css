@@ -339,6 +339,58 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.control-email-form {
+  grid-template-columns: minmax(180px, 260px) auto;
+  align-items: end;
+}
+
+.control-analysis-form {
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) repeat(3, minmax(180px, 1.2fr)) auto;
+  align-items: end;
+}
+
+.form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.control-insight-list {
+  display: grid;
+  gap: 10px;
+}
+
+.control-insight {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #b8d7d1;
+  border-radius: 8px;
+  background: white;
+}
+
+.control-insight.medium {
+  border-left-color: #e0b15b;
+}
+
+.control-insight.high {
+  border-left-color: var(--accent);
+}
+
+.control-insight strong,
+.control-insight p {
+  overflow-wrap: anywhere;
+}
+
+.control-insight p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .admin-form input,
 .admin-form select,
 .admin-row input,
@@ -1794,6 +1846,9 @@ button:disabled {
   .import-form,
   .promote-form,
   .danger-zone-form,
+  .control-email-form,
+  .control-analysis-form,
+  .control-insight,
   .admin-row,
     .editable-row,
     .schedule-admin-row,
