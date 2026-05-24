@@ -4,7 +4,7 @@ export const demoClass = {
   id: "class-a1",
   name: "Α1",
   grade: "Α",
-  schoolYear: "2026-2027"
+  schoolYear: "2025-2026"
 };
 
 export const demoCourses = [

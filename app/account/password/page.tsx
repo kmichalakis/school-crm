@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { changePasswordAction } from "@/app/account/actions";
 import { LogoutButton } from "@/app/logout-button";
+import { SchoolBrand } from "@/app/school-brand";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
 type PasswordPageProps = {
@@ -26,13 +27,10 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
   return (
     <main className="admin-shell">
       <header className="admin-topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Αλλαγή κωδικού</h1>
-            <span>{session.mustChangePassword ? "Απαιτείται νέος ασφαλής κωδικός" : "Ασφάλεια λογαριασμού"}</span>
-          </div>
-        </div>
+        <SchoolBrand
+          title="Αλλαγή κωδικού"
+          subtitle={session.mustChangePassword ? "Απαιτείται νέος ασφαλής κωδικός" : "Ασφάλεια λογαριασμού"}
+        />
         <div className="status-row">
           {!session.mustChangePassword ? (
             <Link className="secondary-button" href="/">

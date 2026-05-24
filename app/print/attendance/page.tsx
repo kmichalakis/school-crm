@@ -1,28 +1,34 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AbsenceStatus, WeekDay } from "@prisma/client";
+import { AbsenceStatus } from "@prisma/client";
 import { PrintButton } from "@/app/print/print-button";
 import { prisma } from "@/lib/prisma";
 import { absenceStatusLabel, hourLabel, weekDayLabel } from "@/lib/report-helpers";
-import { schoolHours } from "@/lib/school-time";
+import { dateToWeekDay, schoolHours } from "@/lib/school-time";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
 type PrintAttendancePageProps = {
   searchParams: Promise<{
     classId?: string;
-    day?: string;
+    date?: string;
   }>;
 };
-
-function isWeekDay(value: string | undefined): value is WeekDay {
-  return Boolean(value && Object.values(WeekDay).includes(value as WeekDay));
-}
 
 function todayLabel() {
   return new Intl.DateTimeFormat("el-GR", {
     dateStyle: "long"
   }).format(new Date());
+}
+
+function printDateLabel(dateValue: string) {
+  return new Intl.DateTimeFormat("el-GR", {
+    dateStyle: "long"
+  }).format(new Date(`${dateValue}T12:00:00`));
+}
+
+function attendanceDate(dateValue: string) {
+  return new Date(`${dateValue}T00:00:00.000Z`);
 }
 
 export default async function PrintAttendancePage({ searchParams }: PrintAttendancePageProps) {
@@ -38,9 +44,9 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
   }
 
   const params = await searchParams;
-  const day = isWeekDay(params.day) ? params.day : WeekDay.MONDAY;
+  const day = params.date ? dateToWeekDay(params.date) : null;
 
-  if (!params.classId) {
+  if (!params.classId || !params.date || !day) {
     redirect("/print");
   }
 
@@ -49,9 +55,7 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
       ? await prisma.teacher.findUnique({
           where: { userId: session.userId },
           include: {
-            courses: {
-              include: { course: true }
-            }
+            responsibleClasses: true
           }
         })
       : null;
@@ -59,12 +63,7 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
   const allowedClassIds =
     session.role === "ADMIN"
       ? undefined
-      : Array.from(
-          new Set([
-            ...(teacher?.homeClassId ? [teacher.homeClassId] : []),
-            ...(teacher?.courses.map((courseLink) => courseLink.course.classId) ?? [])
-          ])
-        );
+      : teacher?.responsibleClasses.map((classRecord) => classRecord.id) ?? [];
 
   if (allowedClassIds && !allowedClassIds.includes(params.classId)) {
     redirect("/");
@@ -87,7 +86,7 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
   const sheets = await prisma.attendanceSheet.findMany({
     where: {
       classId: classRecord.id,
-      day
+      date: attendanceDate(params.date)
     },
     include: {
       course: true,
@@ -113,12 +112,12 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
       <article className="print-document">
         <header className="print-document-header">
           <div>
-            <span>ΣΧΟΛΙΚΗ ΜΟΝΑΔΑ</span>
+            <span>1ο Πρότυπο Γυμνάσιο Μυτιλήνης</span>
             <h1>Ημερήσιο απουσιολόγιο τμήματος</h1>
           </div>
           <div>
             <strong>{todayLabel()}</strong>
-            <span>Έκδοση από Σχολικό CRM</span>
+            <span>Έκδοση από Mytilene Scholaris</span>
           </div>
         </header>
 
@@ -134,6 +133,10 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
           <div>
             <span>Ημέρα</span>
             <strong>{weekDayLabel(day)}</strong>
+          </div>
+          <div>
+            <span>Ημερομηνία</span>
+            <strong>{printDateLabel(params.date)}</strong>
           </div>
           <div>
             <span>Μαθητές</span>

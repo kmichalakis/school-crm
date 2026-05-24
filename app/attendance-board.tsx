@@ -3,35 +3,34 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  BarChart3,
-  CalendarDays,
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   ClipboardCheck,
   History,
-  FileSpreadsheet,
   LockKeyhole,
-  Mail,
   Minus,
   Plus,
   Printer,
   Save,
-  ShieldCheck,
-  UserRound,
-  UsersRound
+  ShieldCheck
 } from "lucide-react";
+import { appTitle, SchoolBrand } from "@/app/school-brand";
 import { currentContext, demoClass, demoCourses, demoStudents } from "@/lib/demo-data";
-import { schoolHours, weekDays } from "@/lib/school-time";
+import { isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
+import { dateToWeekDay, formatDateInput, schoolHours, weekDays } from "@/lib/school-time";
 import type { AttendanceCourseEntry, AttendanceCourseOption, AttendanceSheetPayload, SaveAttendanceAction } from "@/lib/attendance-types";
 
 type UserMode = "tablet" | "teacher";
 type DatabaseStatus = "unknown" | "ready" | "fallback";
+type MessageTone = "info" | "success" | "error";
 
 type AttendanceBoardProps = {
   initialMode: UserMode;
   userLabel: string;
   username: string;
   initialClassId: string;
+  initialDate: string;
   initialDay: string;
   initialHour: number;
   availableClasses: Array<{
@@ -39,11 +38,16 @@ type AttendanceBoardProps = {
     name: string;
     grade: string;
     schoolYear: string;
+    isResponsible?: boolean;
   }>;
   isAdmin: boolean;
+  currentTeacherId: string | null;
+  showClassSelection?: boolean;
+  schoolYearBounds: SchoolYearDateBounds | null;
+  calendarExceptions: SchoolCalendarException[];
 };
 
-const storageKey = "school-crm-attendance-sheets-v1";
+const storageKey = "school-crm-attendance-sheets-v2";
 
 function formatSavedAt(date: Date) {
   return new Intl.DateTimeFormat("el-GR", {
@@ -53,19 +57,21 @@ function formatSavedAt(date: Date) {
   }).format(date);
 }
 
-function getSheetKey(classId: string, day: string, hour: number) {
-  return `${classId}:${day}:${hour}`;
+function getSheetKey(classId: string, date: string, hour: number) {
+  return `${classId}:${date}:${hour}`;
 }
 
-function createDefaultSheet(day: string, hour: number): AttendanceSheetPayload {
+function createDefaultSheet(date: string, day: string, hour: number): AttendanceSheetPayload {
   const defaultCourseOption = {
     courseId: "demo-course",
+    isNoCourse: false,
     name: currentContext.course,
     teacherId: "demo-teacher",
     teacherName: currentContext.teacher
   };
 
   return {
+    date,
     day,
     hour,
     course: currentContext.course,
@@ -108,9 +114,11 @@ function fallbackCourseOptions(sheet: AttendanceSheetPayload): AttendanceCourseO
 
   return (sheet.courses && sheet.courses.length > 0 ? sheet.courses : demoCourses).map((courseName, index) => ({
     courseId: courseName === sheet.course ? "legacy-current-course" : `legacy-course-${index}`,
+    isNoCourse: courseName === "ΚΕΝΟ",
+    isSubstitution: courseName === "ΑΝΑΠΛΗΡΩΣΗ",
     name: courseName,
     teacherId: null,
-    teacherName: courseName === sheet.course ? sheet.teacherName : "Δεν έχει οριστεί εκπαιδευτικός"
+    teacherName: courseName === "ΚΕΝΟ" ? "ΚΕΝΟ" : courseName === sheet.course ? sheet.teacherName : "Δεν έχει οριστεί εκπαιδευτικός"
   }));
 }
 
@@ -157,16 +165,18 @@ function sheetWithCourseEntries(sheet: AttendanceSheetPayload, courseEntries: At
   };
 }
 
-async function fetchAttendanceSheet(classId: string, day: string, hour: number) {
+async function fetchAttendanceSheet(classId: string, date: string, day: string, hour: number) {
   const params = new URLSearchParams({
     classId,
+    date,
     day,
     hour: String(hour)
   });
   const response = await fetch(`/api/attendance?${params.toString()}`);
 
   if (!response.ok) {
-    throw new Error("Η βάση δεν επέστρεψε απουσιολόγιο.");
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Η βάση δεν επέστρεψε απουσιολόγιο.");
   }
 
   return (await response.json()) as AttendanceSheetPayload;
@@ -204,30 +214,51 @@ export function AttendanceBoard({
   userLabel,
   username,
   initialClassId,
+  initialDate,
   initialDay,
   initialHour,
   availableClasses,
-  isAdmin
+  isAdmin,
+  currentTeacherId,
+  showClassSelection = false,
+  schoolYearBounds,
+  calendarExceptions
 }: AttendanceBoardProps) {
   const [mode] = useState<UserMode>(initialMode);
   const [selectedClassId, setSelectedClassId] = useState(initialClassId);
+  const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedDay, setSelectedDay] = useState(initialDay);
   const [selectedHour, setSelectedHour] = useState(initialHour);
   const [sheets, setSheets] = useState<Record<string, AttendanceSheetPayload>>(() => ({
-    [getSheetKey(initialClassId, initialDay, initialHour)]: createDefaultSheet(initialDay, initialHour)
+    [getSheetKey(initialClassId, initialDate, initialHour)]: createDefaultSheet(initialDate, initialDay, initialHour)
   }));
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>("unknown");
   const [isSyncing, setIsSyncing] = useState(false);
   const [message, setMessage] = useState("Δεν υπάρχουν μη αποθηκευμένες αλλαγές.");
+  const [messageTone, setMessageTone] = useState<MessageTone>("info");
   const [isSignatureDialogOpen, setIsSignatureDialogOpen] = useState(false);
+  const [signatureAction, setSignatureAction] = useState<"sign" | "unlock">("sign");
   const [signaturePasswords, setSignaturePasswords] = useState<Record<string, string>>({});
+
+  function showMessage(nextMessage: string, tone: MessageTone = "info") {
+    setMessage(nextMessage);
+    setMessageTone(tone);
+  }
+
+  useEffect(() => {
+    setSelectedClassId(initialClassId);
+    setSelectedDate(initialDate);
+    setSelectedDay(initialDay);
+    setSelectedHour(initialHour);
+    setSelectedStudentId(null);
+  }, [initialClassId, initialDate, initialDay, initialHour]);
 
   useEffect(() => {
     const storedSheets = readStoredSheets();
     if (Object.keys(storedSheets).length > 0) {
       setSheets(storedSheets);
-      setMessage("Φορτώθηκαν τα αποθηκευμένα πρόχειρα από τη συσκευή.");
+      showMessage("Φορτώθηκαν τα αποθηκευμένα πρόχειρα από τη συσκευή.");
     }
   }, []);
 
@@ -237,7 +268,7 @@ export function AttendanceBoard({
     async function loadFromDatabase() {
       setIsSyncing(true);
       try {
-        const payload = await fetchAttendanceSheet(selectedClassId, selectedDay, selectedHour);
+        const payload = await fetchAttendanceSheet(selectedClassId, selectedDate, selectedDay, selectedHour);
         if (cancelled) {
           return;
         }
@@ -245,20 +276,20 @@ export function AttendanceBoard({
         setSheets((currentSheets) => {
           const nextSheets = {
             ...currentSheets,
-            [getSheetKey(selectedClassId, selectedDay, selectedHour)]: payload
+            [getSheetKey(selectedClassId, selectedDate, selectedHour)]: payload
           };
           writeStoredSheets(nextSheets);
           return nextSheets;
         });
         setDatabaseStatus("ready");
-        setMessage("Το απουσιολόγιο φορτώθηκε από τη βάση δεδομένων.");
-      } catch {
+        showMessage("Το απουσιολόγιο φορτώθηκε από τη βάση δεδομένων.", "success");
+      } catch (error) {
         if (cancelled) {
           return;
         }
 
         setDatabaseStatus("fallback");
-        setMessage("Η βάση δεν είναι διαθέσιμη. Προσωρινά χρησιμοποιείται αποθήκευση στη συσκευή.");
+        showMessage(error instanceof Error ? error.message : "Η βάση δεν είναι διαθέσιμη. Προσωρινά χρησιμοποιείται αποθήκευση στη συσκευή.", "error");
       } finally {
         if (!cancelled) {
           setIsSyncing(false);
@@ -271,10 +302,10 @@ export function AttendanceBoard({
     return () => {
       cancelled = true;
     };
-  }, [selectedClassId, selectedDay, selectedHour]);
+  }, [selectedClassId, selectedDate, selectedDay, selectedHour]);
 
-  const selectedSheetKey = getSheetKey(selectedClassId, selectedDay, selectedHour);
-  const currentSheet = sheets[selectedSheetKey] ?? createDefaultSheet(selectedDay, selectedHour);
+  const selectedSheetKey = getSheetKey(selectedClassId, selectedDate, selectedHour);
+  const currentSheet = sheets[selectedSheetKey] ?? createDefaultSheet(selectedDate, selectedDay, selectedHour);
   const currentClass = availableClasses.find((classRecord) => classRecord.id === selectedClassId) ?? availableClasses[0] ?? demoClass;
   const courseOptions = useMemo(() => fallbackCourseOptions(currentSheet), [currentSheet]);
   const currentCourseEntries = useMemo(() => normalizedCourseEntries(currentSheet), [currentSheet]);
@@ -283,10 +314,6 @@ export function AttendanceBoard({
     () => weekDays.find((day) => day.value === selectedDay)?.label ?? "Δευτέρα",
     [selectedDay]
   );
-  const selectedHourLabel = useMemo(
-    () => schoolHours.find((slot) => slot.hour === selectedHour)?.label ?? "1η ώρα",
-    [selectedHour]
-  );
   const absentCount = currentSheet.students.filter((student) => student.absent).length;
   const isTeacher = mode === "teacher";
   const isClassTablet = mode === "tablet" && !isAdmin;
@@ -294,10 +321,15 @@ export function AttendanceBoard({
   const hasAnySignature = signedCourseCount > 0;
   const isSigned = currentCourseEntries.length > 0 && signedCourseCount === currentCourseEntries.length;
   const signatureStatus = isSigned ? "Υπογεγραμμένο" : hasAnySignature ? `Μερική (${signedCourseCount}/${currentCourseEntries.length})` : "Ανοιχτό";
-  const canEdit = !hasAnySignature || isTeacher;
-  const canSign = (isTeacher || isClassTablet) && !isSigned && !isSyncing;
+  const canEdit = !isSigned || isTeacher;
+  const isFutureAttendanceDate = selectedDate > formatDateInput(new Date());
+  const hasUnsignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && !entry.signedAt);
+  const hasSignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && entry.signedAt);
+  const canSign = (isClassTablet || hasUnsignedCourseForCurrentTeacher) && !isSigned && !isSyncing && !isFutureAttendanceDate;
+  const canUnlock = (isClassTablet || hasSignedCourseForCurrentTeacher) && isSigned && !isSyncing;
   const signedAtDate = currentSheet.signedAt ? new Date(currentSheet.signedAt) : null;
   const savedAtDate = currentSheet.savedAt ? new Date(currentSheet.savedAt) : null;
+  const selectedDateAllowed = isAllowedSchoolDate(selectedDate, schoolYearBounds, calendarExceptions);
   const selectedStudent = currentSheet.students.find((student) => student.id === selectedStudentId) ?? null;
   const selectedStudentHistory = selectedStudent
     ? Object.values(sheets)
@@ -307,7 +339,7 @@ export function AttendanceBoard({
 
   function updateCurrentSheet(updater: (sheet: AttendanceSheetPayload) => AttendanceSheetPayload) {
     setSheets((currentSheets) => {
-      const activeSheet = currentSheets[selectedSheetKey] ?? createDefaultSheet(selectedDay, selectedHour);
+      const activeSheet = currentSheets[selectedSheetKey] ?? createDefaultSheet(selectedDate, selectedDay, selectedHour);
       return {
         ...currentSheets,
         [selectedSheetKey]: updater(activeSheet)
@@ -317,7 +349,7 @@ export function AttendanceBoard({
 
   function toggleStudentAbsence(studentId: string) {
     if (!canEdit) {
-      setMessage("Το υπογεγραμμένο απουσιολόγιο δεν αλλάζει από το tablet τάξης.");
+      showMessage("Το υπογεγραμμένο απουσιολόγιο δεν αλλάζει από το tablet τάξης.", "error");
       return;
     }
 
@@ -327,10 +359,28 @@ export function AttendanceBoard({
       signedAt: sheet.signedAt && isTeacher ? null : sheet.signedAt,
       dirty: true,
       students: sheet.students.map((student) =>
-        student.id === studentId ? { ...student, absent: !student.absent } : student
+        student.id === studentId ? { ...student, absent: !student.absent, isHourlyExpulsion: student.absent ? false : student.isHourlyExpulsion } : student
       )
     }));
-    setMessage("Υπάρχουν μη αποθηκευμένες αλλαγές.");
+    showMessage("Υπάρχουν μη αποθηκευμένες αλλαγές.");
+  }
+
+  function toggleHourlyExpulsion(studentId: string) {
+    if (!canEdit) {
+      showMessage("Το υπογεγραμμένο απουσιολόγιο δεν αλλάζει από το tablet τάξης.", "error");
+      return;
+    }
+
+    updateCurrentSheet((sheet) => ({
+      ...sheet,
+      savedAt: null,
+      signedAt: sheet.signedAt && isTeacher ? null : sheet.signedAt,
+      dirty: true,
+      students: sheet.students.map((student) =>
+        student.id === studentId ? { ...student, absent: true, isHourlyExpulsion: !student.isHourlyExpulsion } : student
+      )
+    }));
+    showMessage("Η ένδειξη ωριαίας αποβολής ενημερώθηκε.");
   }
 
   async function saveDraft() {
@@ -360,10 +410,10 @@ export function AttendanceBoard({
         return syncedSheets;
       });
       setDatabaseStatus("ready");
-      setMessage(`Το πρόχειρο αποθηκεύτηκε στη βάση στις ${formatSavedAt(now)}.`);
+      showMessage(`Το πρόχειρο αποθηκεύτηκε στη βάση στις ${formatSavedAt(now)}.`, "success");
     } catch {
       setDatabaseStatus("fallback");
-      setMessage(`Το πρόχειρο αποθηκεύτηκε μόνο στη συσκευή στις ${formatSavedAt(now)}.`);
+      showMessage(`Το πρόχειρο αποθηκεύτηκε μόνο στη συσκευή στις ${formatSavedAt(now)}.`, "error");
     } finally {
       setIsSyncing(false);
     }
@@ -371,7 +421,7 @@ export function AttendanceBoard({
 
   async function signAttendanceSheet(passwords?: Record<string, string>) {
     if (!isTeacher && !isClassTablet) {
-      setMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ξεκινήσει υπογραφή.");
+      showMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ξεκινήσει υπογραφή.", "error");
       return;
     }
 
@@ -396,9 +446,44 @@ export function AttendanceBoard({
       setDatabaseStatus("ready");
       setIsSignatureDialogOpen(false);
       setSignaturePasswords({});
-      setMessage(`Το απουσιολόγιο υπογράφηκε στη βάση στις ${formatSavedAt(now)}.`);
+      showMessage(`Το απουσιολόγιο υπογράφηκε στη βάση στις ${formatSavedAt(now)}.`, "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Αποτυχία υπογραφής απουσιολογίου.");
+      showMessage(error instanceof Error ? error.message : "Αποτυχία υπογραφής απουσιολογίου.", "error");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  async function unlockAttendanceSheet(passwords?: Record<string, string>) {
+    if (!isTeacher && !isClassTablet) {
+      showMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ακυρώσει υπογραφή.", "error");
+      return;
+    }
+
+    const now = new Date();
+    const sheetToUnlock = sheetWithCourseEntries({
+      ...currentSheet,
+      savedAt: now.toISOString(),
+      dirty: false
+    }, currentCourseEntries);
+    setIsSyncing(true);
+
+    try {
+      const persistedSheet = await persistAttendanceSheet(selectedClassId, sheetToUnlock, "unlock", passwords);
+      setSheets((currentSheets) => {
+        const syncedSheets = {
+          ...currentSheets,
+          [selectedSheetKey]: persistedSheet
+        };
+        writeStoredSheets(syncedSheets);
+        return syncedSheets;
+      });
+      setDatabaseStatus("ready");
+      setIsSignatureDialogOpen(false);
+      setSignaturePasswords({});
+      showMessage("Η υπογραφή ακυρώθηκε. Το απουσιολόγιο άνοιξε για διορθώσεις.", "success");
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : "Αποτυχία ακύρωσης υπογραφής.", "error");
     } finally {
       setIsSyncing(false);
     }
@@ -410,33 +495,66 @@ export function AttendanceBoard({
       return;
     }
 
-    const nextEntries = currentCourseEntries.map((entry, index) =>
-      index === position
-        ? {
+    const nextEntries = selectedOption.isNoCourse
+      ? [
+          {
             ...selectedOption,
-            position,
+            position: 0,
             signedAt: null
           }
-        : entry
-    );
+        ]
+      : currentCourseEntries.map((entry, index) =>
+          index === position
+            ? {
+                ...selectedOption,
+                position,
+                teacherId: selectedOption.isSubstitution ? null : selectedOption.teacherId,
+                teacherName: selectedOption.isSubstitution ? "Επιλέξτε εκπαιδευτικό αναπλήρωσης" : selectedOption.teacherName,
+                signedAt: null
+              }
+            : entry
+        );
     updateCurrentSheet((sheet) => ({
       ...sheetWithCourseEntries(sheet, nextEntries),
       savedAt: null,
+      dirty: true,
+      students: selectedOption.isNoCourse ? sheet.students.map((student) => ({ ...student, absent: false })) : sheet.students
+    }));
+    showMessage(selectedOption.isNoCourse ? "Η ώρα ορίστηκε ως ΚΕΝΟ." : "Το μάθημα και ο εκπαιδευτικός ενημερώθηκαν αυτόματα.");
+  }
+
+  function updateSubstitutionTeacher(position: number, teacherId: string) {
+    const teacher = currentSheet.teacherOptions?.find((teacherOption) => teacherOption.id === teacherId);
+    updateCurrentSheet((sheet) => ({
+      ...sheetWithCourseEntries(
+        sheet,
+        currentCourseEntries.map((entry, index) =>
+          index === position
+            ? {
+                ...entry,
+                teacherId: teacher?.id ?? null,
+                teacherName: teacher?.name ?? "Επιλέξτε εκπαιδευτικό αναπλήρωσης",
+                signedAt: null
+              }
+            : entry
+        )
+      ),
+      savedAt: null,
       dirty: true
     }));
-    setMessage("Το μάθημα και ο εκπαιδευτικός ενημερώθηκαν αυτόματα.");
+    showMessage("Ο εκπαιδευτικός αναπλήρωσης ενημερώθηκε.");
   }
 
   function addCourseEntry() {
     if (currentCourseEntries.length >= 2) {
-      setMessage("Μπορούν να υπάρχουν μέχρι δύο μαθήματα στην ίδια ώρα.");
+      showMessage("Μπορούν να υπάρχουν μέχρι δύο μαθήματα στην ίδια ώρα.", "error");
       return;
     }
 
     const existingCourseIds = new Set(currentCourseEntries.map((entry) => entry.courseId));
-    const nextOption = courseOptions.find((option) => !existingCourseIds.has(option.courseId));
+    const nextOption = courseOptions.find((option) => !option.isNoCourse && !existingCourseIds.has(option.courseId));
     if (!nextOption) {
-      setMessage("Δεν υπάρχει άλλο διαθέσιμο μάθημα για προσθήκη.");
+      showMessage("Δεν υπάρχει άλλο διαθέσιμο μάθημα για προσθήκη.", "error");
       return;
     }
 
@@ -453,7 +571,7 @@ export function AttendanceBoard({
       savedAt: null,
       dirty: true
     }));
-    setMessage("Προστέθηκε δεύτερο μάθημα για την ώρα.");
+    showMessage("Προστέθηκε δεύτερο μάθημα για την ώρα.");
   }
 
   function removeCourseEntry(position: number) {
@@ -469,22 +587,7 @@ export function AttendanceBoard({
       savedAt: null,
       dirty: true
     }));
-    setMessage("Αφαιρέθηκε το δεύτερο μάθημα της ώρας.");
-  }
-
-  function setNoCourse() {
-    const noCourseOption = courseOptions.find((option) => option.name === "ΚΕΝΟ");
-    if (!noCourseOption) {
-      setMessage("Δεν υπάρχει μάθημα ΚΕΝΟ στο τμήμα.");
-      return;
-    }
-
-    updateCurrentSheet((sheet) => ({
-      ...sheetWithCourseEntries(sheet, [{ ...noCourseOption, position: 0, signedAt: null }]),
-      savedAt: null,
-      dirty: true
-    }));
-    setMessage("Ορίστηκε ΚΕΝΟ για την επιλεγμένη ώρα.");
+    showMessage("Αφαιρέθηκε το δεύτερο μάθημα της ώρας.");
   }
 
   function reopenSignedSheet() {
@@ -497,14 +600,14 @@ export function AttendanceBoard({
       savedAt: null,
       dirty: true
     }));
-    setMessage("Το απουσιολόγιο άνοιξε ξανά για διόρθωση από εκπαιδευτικό.");
+    showMessage("Το απουσιολόγιο άνοιξε ξανά για διόρθωση από εκπαιδευτικό.");
   }
 
   async function clearCurrentSheet() {
     setIsSyncing(true);
 
     try {
-      const payload = await fetchAttendanceSheet(selectedClassId, selectedDay, selectedHour);
+      const payload = await fetchAttendanceSheet(selectedClassId, selectedDate, selectedDay, selectedHour);
       setSheets((currentSheets) => {
         const nextSheets = {
           ...currentSheets,
@@ -514,10 +617,10 @@ export function AttendanceBoard({
         return nextSheets;
       });
       setDatabaseStatus("ready");
-      setMessage("Η ώρα επαναφορτώθηκε από τη βάση δεδομένων.");
+      showMessage("Η ώρα επαναφορτώθηκε από τη βάση δεδομένων.", "success");
     } catch {
       setDatabaseStatus("fallback");
-      setMessage("Δεν έγινε επαναφορά, γιατί η βάση δεν απάντησε. Τα τρέχοντα δεδομένα έμειναν όπως ήταν.");
+      showMessage("Δεν έγινε επαναφορά, γιατί η βάση δεν απάντησε. Τα τρέχοντα δεδομένα έμειναν όπως ήταν.", "error");
     } finally {
       setIsSyncing(false);
     }
@@ -531,22 +634,11 @@ export function AttendanceBoard({
   return (
     <main className={isClassTablet ? "app-shell tablet-shell" : "app-shell"}>
       <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Σχολικό CRM</h1>
-            <span>Διαχείριση παρουσιών και απουσιών</span>
-          </div>
-        </div>
+        <SchoolBrand title={appTitle} subtitle="Διαχείριση παρουσιών και απουσιών" />
         <div className="user-chip">
           <ShieldCheck size={17} />
           {userLabel}
         </div>
-        {isAdmin ? (
-          <Link className="secondary-button" href="/admin">
-            Διαχείριση
-          </Link>
-        ) : null}
         <button className="secondary-button" onClick={logout} type="button">
           Αποσύνδεση
         </button>
@@ -555,64 +647,62 @@ export function AttendanceBoard({
       <div className={isClassTablet ? "workspace tablet-workspace" : "workspace"}>
         {isClassTablet ? null : (
         <nav className="sidebar" aria-label="Κύρια πλοήγηση">
-          <button className="nav-button active">
+          <Link className="nav-button active" href="/">
             <ClipboardCheck size={18} />
             Απουσιολόγιο
-          </button>
-          <Link className="nav-button" href="/students">
-            <UsersRound size={18} />
-            Μαθητές
           </Link>
           <Link className="nav-button" href="/teacher">
             <CalendarClock size={18} />
-            Σήμερα
+            Μαθήματα
           </Link>
-          <Link className="nav-button" href="/dashboard">
-            <BarChart3 size={18} />
-            Dashboard
+          <Link className="nav-button" href="/pending">
+            <ClipboardCheck size={18} />
+            Εκκρεμότητες
           </Link>
           <Link className="nav-button" href="/reports">
-            <BarChart3 size={18} />
-            Αναφορές τάξης
-          </Link>
-          <Link className="nav-button" href="/api/reports/export">
-            <FileSpreadsheet size={18} />
-            Εξαγωγές
-          </Link>
-          <Link className="nav-button" href="/notifications">
-            <Mail size={18} />
-            Κανόνες ειδοποιήσεων
-          </Link>
-          <Link className="nav-button" href="/schedule">
-            <CalendarDays size={18} />
-            Πρόγραμμα
+            <ClipboardCheck size={18} />
+            Τμήματα
           </Link>
           <Link className="nav-button" href="/print">
             <Printer size={18} />
             Εκτυπώσεις
           </Link>
+          {isAdmin ? (
+            <>
+              <Link className="nav-button" href="/dashboard">
+                <ClipboardCheck size={18} />
+                Dashboard
+              </Link>
+              <Link className="nav-button" href="/api/reports/export">
+                <Printer size={18} />
+                Εξαγωγές
+              </Link>
+              <Link className="nav-button" href="/notifications">
+                <ShieldCheck size={18} />
+                Κανόνες ειδοποιήσεων
+              </Link>
+              <Link className="nav-button" href="/schedule">
+                <CalendarClock size={18} />
+                Πρόγραμμα
+              </Link>
+              <Link className="nav-button" href="/admin">
+                <ShieldCheck size={18} />
+                Διαχείριση
+              </Link>
+            </>
+          ) : null}
         </nav>
         )}
 
         <section className="main-grid">
           <div className="page-header">
             <div>
-              <h2>Απουσιολόγιο τάξης {currentClass.name}</h2>
-              {isClassTablet ? null : (
+              <h2>{showClassSelection ? "Απουσιολόγιο" : `Απουσιολόγιο τάξης ${currentClass.name}`}</h2>
+              {isClassTablet || showClassSelection ? null : (
                 <p>
                   Σχολικό έτος {currentClass.schoolYear}, Τάξη {currentClass.grade}. Το τάμπλετ της τάξης ανοίγει απευθείας αυτή την οθόνη.
                 </p>
               )}
-            </div>
-            <div className="status-row">
-              <span className="pill">
-                <CalendarClock size={15} />
-                {selectedDayLabel}, {selectedHourLabel}
-              </span>
-              <span className="pill">
-                <UserRound size={15} />
-                {currentSheet.teacherName}
-              </span>
             </div>
           </div>
 
@@ -640,7 +730,7 @@ export function AttendanceBoard({
                   onChange={(event) => {
                     setSelectedClassId(event.target.value);
                     setSelectedStudentId(null);
-                    setMessage("Ο admin άλλαξε τμήμα εργασίας.");
+                    showMessage("Ο admin άλλαξε τμήμα εργασίας.");
                   }}
                 >
                   {availableClasses.map((classRecord) => (
@@ -653,6 +743,34 @@ export function AttendanceBoard({
             </section>
           ) : null}
 
+          {showClassSelection ? (
+            <section className="admin-section">
+              <div className="admin-section-title">
+                <h2>Επιλογή τμήματος</h2>
+                <p>Διάλεξε τμήμα για να ανοίξει το απουσιολόγιο στην κοντινότερη κατάλληλη ημερομηνία και ώρα.</p>
+              </div>
+              <div className="teacher-class-list">
+                {availableClasses.length > 0 ? (
+                  availableClasses.map((classRecord) => (
+                    <Link
+                      className="teacher-class-link"
+                      href={`/?classId=${classRecord.id}&date=${selectedDate}&hour=${selectedHour}`}
+                      key={classRecord.id}
+                    >
+                      <strong>{classRecord.name}</strong>
+                      <span>{classRecord.schoolYear}</span>
+                      {classRecord.isResponsible ? <em>Υπεύθυνος/η</em> : null}
+                    </Link>
+                  ))
+                ) : (
+                  <p>Δεν έχουν συνδεθεί τμήματα με αυτόν τον εκπαιδευτικό.</p>
+                )}
+              </div>
+            </section>
+          ) : null}
+
+          {showClassSelection ? null : (
+          <>
           <div className="summary-grid">
             <div className="panel metric">
               <span>Μαθητές</span>
@@ -675,21 +793,31 @@ export function AttendanceBoard({
           <section className="panel">
             <div className="controls">
               <div className="field">
-                <label htmlFor="day">Ημέρα</label>
-                <select
-                  id="day"
-                  value={selectedDay}
+                <label htmlFor="attendanceDate">Ημερομηνία</label>
+                <input
+                  id="attendanceDate"
+                  type="date"
+                  min={schoolYearBounds?.startsOn}
+                  max={schoolYearBounds?.endsOn}
+                  value={selectedDate}
                   onChange={(event) => {
-                    setSelectedDay(event.target.value);
-                    setMessage("Φορτώθηκε το απουσιολόγιο της επιλεγμένης ημέρας.");
+                    const nextDate = event.target.value;
+                    const nextDay = dateToWeekDay(nextDate);
+                    if (!nextDay) {
+                      showMessage("Επιλέξτε εργάσιμη ημέρα Δευτέρα έως Παρασκευή.", "error");
+                      return;
+                    }
+                    if (!isAllowedSchoolDate(nextDate, schoolYearBounds, calendarExceptions)) {
+                      showMessage("Η ημερομηνία είναι εκτός σχολικού έτους ή έχει δηλωθεί μη εργάσιμη στο ημερολόγιο.", "error");
+                      return;
+                    }
+
+                    setSelectedDate(nextDate);
+                    setSelectedDay(nextDay);
+                    showMessage("Φορτώθηκε το απουσιολόγιο της επιλεγμένης ημερομηνίας.");
                   }}
-                >
-                  {weekDays.map((day) => (
-                    <option key={day.value} value={day.value}>
-                      Ημέρα {day.number}: {day.label}
-                    </option>
-                  ))}
-                </select>
+                />
+                <span className="field-hint">{selectedDayLabel}</span>
               </div>
 
               <div className="field">
@@ -699,7 +827,7 @@ export function AttendanceBoard({
                   value={selectedHour}
                   onChange={(event) => {
                     setSelectedHour(Number(event.target.value));
-                    setMessage("Φορτώθηκε το απουσιολόγιο της επιλεγμένης ώρας.");
+                    showMessage("Φορτώθηκε το απουσιολόγιο της επιλεγμένης ώρας.");
                   }}
                 >
                   {schoolHours.map((slot) => (
@@ -732,6 +860,21 @@ export function AttendanceBoard({
                             ))}
                         </select>
                         <span className="course-teacher-name">{entry.teacherName}</span>
+                        {entry.isSubstitution ? (
+                          <select
+                            aria-label={`Εκπαιδευτικός αναπλήρωσης ${index + 1}`}
+                            disabled={!canEdit || Boolean(entry.signedAt)}
+                            value={entry.teacherId ?? ""}
+                            onChange={(event) => updateSubstitutionTeacher(index, event.target.value)}
+                          >
+                            <option value="">Επιλέξτε εκπαιδευτικό</option>
+                            {(currentSheet.teacherOptions ?? []).map((teacher) => (
+                              <option key={teacher.id} value={teacher.id}>
+                                {teacher.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
                         {index === 0 && currentCourseEntries.length < 2 ? (
                           <button
                             aria-label="Προσθήκη δεύτερου μαθήματος"
@@ -773,8 +916,16 @@ export function AttendanceBoard({
                   ? `Υπογραφή ${formatSavedAt(signedAtDate)}`
                   : hasAnySignature
                     ? `Μερική υπογραφή ${signedCourseCount}/${currentCourseEntries.length}`
-                    : "Ο εκπαιδευτικός υπογράφει μετά τον έλεγχο"}
+                  : "Ο εκπαιδευτικός υπογράφει μετά τον έλεγχο"}
               </span>
+            </div>
+
+            <div className={`status-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"} aria-live="polite">
+              <span className="status-message-main">
+                {messageTone === "error" ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+                {message}
+              </span>
+              {savedAtDate ? <strong>Τελευταία αποθήκευση: {formatSavedAt(savedAtDate)}</strong> : null}
             </div>
 
             <div className="student-list">
@@ -792,6 +943,14 @@ export function AttendanceBoard({
                     type="button"
                   >
                     {student.absent ? "Απών/Απούσα" : "Παρών/Παρούσα"}
+                  </button>
+                  <button
+                    className={`absence-toggle expulsion-toggle${student.isHourlyExpulsion ? " marked" : ""}`}
+                    disabled={!student.absent}
+                    onClick={() => toggleHourlyExpulsion(student.id)}
+                    type="button"
+                  >
+                    Ωριαία αποβολή
                   </button>
                   <button
                     className="icon-button"
@@ -820,8 +979,8 @@ export function AttendanceBoard({
                 </div>
                 <div className="history-list">
                   {selectedStudentHistory.map((sheet) => (
-                    <span className="history-chip" key={`${sheet.day}-${sheet.hour}`}>
-                      {weekDays.find((day) => day.value === sheet.day)?.label}, {schoolHours.find((slot) => slot.hour === sheet.hour)?.label}
+                    <span className="history-chip" key={`${sheet.date}-${sheet.hour}`}>
+                      {sheet.date}, {weekDays.find((day) => day.value === sheet.day)?.label}, {schoolHours.find((slot) => slot.hour === sheet.hour)?.label}
                     </span>
                   ))}
                 </div>
@@ -831,16 +990,8 @@ export function AttendanceBoard({
               </div>
             ) : null}
 
-            <div className="status-message" role="status">
-              <span>{message}</span>
-              {savedAtDate ? <strong>Τελευταία αποθήκευση: {formatSavedAt(savedAtDate)}</strong> : null}
-            </div>
-
             <div className="teacher-actions">
-              <button className="secondary-button danger" disabled={!canEdit} onClick={setNoCourse} type="button">
-                Ορισμός ΚΕΝΟΥ
-              </button>
-              <button className="secondary-button" disabled={isSyncing} onClick={saveDraft} type="button">
+              <button className="secondary-button" disabled={isSyncing || !selectedDateAllowed} onClick={saveDraft} type="button">
                 <Save size={18} />
                 Αποθήκευση πρόχειρου
               </button>
@@ -849,26 +1000,50 @@ export function AttendanceBoard({
                   Άνοιγμα για διόρθωση
                 </button>
               ) : null}
-              <button className="secondary-button" disabled={!canEdit || isSyncing} onClick={() => void clearCurrentSheet()} type="button">
+              <button className="secondary-button" disabled={!canEdit || isSyncing || !selectedDateAllowed} onClick={() => void clearCurrentSheet()} type="button">
                 Επαναφορά ώρας
               </button>
-              <button
-                className="primary-button"
-                disabled={!canSign}
-                onClick={() => {
-                  if (isClassTablet) {
-                    setIsSignatureDialogOpen(true);
-                    return;
-                  }
-                  void signAttendanceSheet();
-                }}
-                type="button"
-              >
-                <CheckCircle2 size={18} />
-                Υπογραφή απουσιολογίου
-              </button>
+              {isSigned ? (
+                <button
+                  className="primary-button"
+                  disabled={!canUnlock || !selectedDateAllowed}
+                  onClick={() => {
+                    if (isClassTablet) {
+                      setSignatureAction("unlock");
+                      setSignaturePasswords({});
+                      setIsSignatureDialogOpen(true);
+                      return;
+                    }
+                    void unlockAttendanceSheet();
+                  }}
+                  type="button"
+                >
+                  <LockKeyhole size={18} />
+                  Ακύρωση υπογραφής
+                </button>
+              ) : (
+                <button
+                  className="primary-button"
+                  disabled={!canSign || !selectedDateAllowed}
+                  onClick={() => {
+                    if (isClassTablet) {
+                      setSignatureAction("sign");
+                      setSignaturePasswords({});
+                      setIsSignatureDialogOpen(true);
+                      return;
+                    }
+                    void signAttendanceSheet();
+                  }}
+                  type="button"
+                >
+                  <CheckCircle2 size={18} />
+                  Υπογραφή απουσιολογίου
+                </button>
+              )}
             </div>
           </section>
+          </>
+          )}
         </section>
       </div>
 
@@ -878,12 +1053,21 @@ export function AttendanceBoard({
             className="signature-modal"
             onSubmit={(event) => {
               event.preventDefault();
+              if (signatureAction === "unlock") {
+                void unlockAttendanceSheet(signaturePasswords);
+                return;
+              }
+
               void signAttendanceSheet(signaturePasswords);
             }}
           >
             <div>
-              <h3>Υπογραφή απουσιολογίου</h3>
-              <p>Κάθε εκπαιδευτικός πληκτρολογεί μόνο τον δικό του κωδικό.</p>
+              <h3>{signatureAction === "unlock" ? "Ακύρωση υπογραφής" : "Υπογραφή απουσιολογίου"}</h3>
+              <p>
+                {signatureAction === "unlock"
+                  ? "Ένας από τους εκπαιδευτικούς πληκτρολογεί τον κωδικό του για να ανοίξει το απουσιολόγιο."
+                  : "Κάθε εκπαιδευτικός πληκτρολογεί μόνο τον δικό του κωδικό."}
+              </p>
             </div>
             <div className="signature-course-list">
               {currentCourseEntries.map((entry, index) => (
@@ -892,8 +1076,10 @@ export function AttendanceBoard({
                     <strong>{entry.teacherName}</strong>
                     <span>{entry.name}</span>
                   </div>
-                  {entry.signedAt ? (
+                  {signatureAction === "sign" && entry.signedAt ? (
                     <span className="sync-pill ready">Υπογεγραμμένο</span>
+                  ) : signatureAction === "unlock" && !entry.signedAt ? (
+                    <span className="sync-pill">Δεν έχει υπογραφεί</span>
                   ) : (
                     <input
                       aria-label={`Κωδικός εκπαιδευτικού ${entry.teacherName}`}
@@ -928,11 +1114,14 @@ export function AttendanceBoard({
                 className="primary-button"
                 disabled={
                   isSyncing ||
-                  !currentCourseEntries.some((entry) => !entry.signedAt && (signaturePasswords[entry.courseId]?.length ?? 0) >= 4)
+                  !currentCourseEntries.some((entry) => {
+                    const canSubmitEntry = signatureAction === "unlock" ? Boolean(entry.signedAt) : !entry.signedAt;
+                    return canSubmitEntry && (signaturePasswords[entry.courseId]?.length ?? 0) >= 4;
+                  })
                 }
                 type="submit"
               >
-                Υπογραφή
+                {signatureAction === "unlock" ? "Ακύρωση υπογραφής" : "Υπογραφή"}
               </button>
             </div>
           </form>

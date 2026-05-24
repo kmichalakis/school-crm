@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus } from "@prisma/client";
+import { AppNavigation } from "@/app/app-navigation";
 import { prisma } from "@/lib/prisma";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { weekDays } from "@/lib/school-time";
@@ -36,6 +36,11 @@ export default async function DashboardPage() {
           }
         })
       : null;
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    include: { teacher: true }
+  });
+  const userLabel = user?.teacher ? `${user.teacher.name} ${user.teacher.surname}` : user?.username ?? "Χρήστης";
 
   const allowedClassIds =
     session.role === "ADMIN"
@@ -204,35 +209,13 @@ export default async function DashboardPage() {
     .slice(0, 6);
 
   return (
-    <main className="admin-shell">
-      <header className="admin-topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Dashboard</h1>
-            <span>Στατιστικά απουσιών, τάσεων και εκκρεμοτήτων</span>
-          </div>
-        </div>
-        <div className="status-row">
-          <Link className="secondary-button" href="/">
-            Απουσιολόγιο
-          </Link>
-          <Link className="secondary-button" href="/teacher">
-            Σήμερα
-          </Link>
-          <Link className="secondary-button" href="/reports">
-            Αναφορές
-          </Link>
-          <Link className="secondary-button" href="/print">
-            Εκτυπώσεις
-          </Link>
-          {session.role === "ADMIN" ? (
-            <Link className="secondary-button" href="/admin">
-              Διαχείριση
-            </Link>
-          ) : null}
-        </div>
-      </header>
+    <AppNavigation
+      active="dashboard"
+      role={session.role}
+      title="Dashboard"
+      subtitle="Στατιστικά απουσιών, τάσεων και εκκρεμοτήτων"
+      userLabel={userLabel}
+    >
 
       <div className="summary-grid">
         <div className="panel metric">
@@ -410,6 +393,6 @@ export default async function DashboardPage() {
           {pendingScheduleRows.length === 0 ? <div className="empty-state">Δεν υπάρχουν εκκρεμότητες προγράμματος.</div> : null}
         </div>
       </section>
-    </main>
+    </AppNavigation>
   );
 }

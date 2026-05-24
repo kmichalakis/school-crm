@@ -19,6 +19,12 @@ function todayLabel() {
   }).format(new Date());
 }
 
+function schoolDateLabel(date: Date) {
+  return new Intl.DateTimeFormat("el-GR", {
+    dateStyle: "short"
+  }).format(date);
+}
+
 export default async function PrintStudentPage({ searchParams }: PrintStudentPageProps) {
   const cookieStore = await cookies();
   const session = parseSessionToken(cookieStore.get(sessionCookieName)?.value);
@@ -41,9 +47,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
       ? await prisma.teacher.findUnique({
           where: { userId: session.userId },
           include: {
-            courses: {
-              include: { course: true }
-            }
+            responsibleClasses: true
           }
         })
       : null;
@@ -51,12 +55,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
   const allowedClassIds =
     session.role === "ADMIN"
       ? undefined
-      : Array.from(
-          new Set([
-            ...(teacher?.homeClassId ? [teacher.homeClassId] : []),
-            ...(teacher?.courses.map((courseLink) => courseLink.course.classId) ?? [])
-          ])
-        );
+      : teacher?.responsibleClasses.map((classRecord) => classRecord.id) ?? [];
 
   const student = await prisma.student.findUnique({
     where: { id: params.studentId },
@@ -77,7 +76,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
             }
           }
         },
-        orderBy: [{ sheet: { day: "asc" } }, { sheet: { hour: "asc" } }]
+        orderBy: [{ sheet: { date: "asc" } }, { sheet: { hour: "asc" } }]
       }
     }
   });
@@ -105,12 +104,12 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
       <article className="print-document">
         <header className="print-document-header">
           <div>
-            <span>ΣΧΟΛΙΚΗ ΜΟΝΑΔΑ</span>
+            <span>1ο Πρότυπο Γυμνάσιο Μυτιλήνης</span>
             <h1>Ατομική κατάσταση απουσιών</h1>
           </div>
           <div>
             <strong>{todayLabel()}</strong>
-            <span>Έκδοση από Σχολικό CRM</span>
+            <span>Έκδοση από Mytilene Scholaris</span>
           </div>
         </header>
 
@@ -167,7 +166,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
           <table className="print-table">
             <thead>
               <tr>
-                <th>Ημέρα</th>
+                <th>Ημερομηνία</th>
                 <th>Ώρα</th>
                 <th>Μάθημα</th>
                 <th>Κατάσταση</th>
@@ -177,11 +176,19 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
             <tbody>
               {student.sheetAbsences.map((absence) => (
                 <tr key={`${absence.sheetId}-${absence.studentId}`}>
-                  <td>{weekDayLabel(absence.sheet.day)}</td>
+                  <td>
+                    {schoolDateLabel(absence.sheet.date)}
+                    <br />
+                    <span>{weekDayLabel(absence.sheet.day)}</span>
+                  </td>
                   <td>{hourLabel(absence.sheet.hour)}</td>
                   <td>{absence.sheet.course.name}</td>
                   <td>{absenceStatusLabel(absence.status)}</td>
-                  <td>{absence.excusedReason ?? ""}</td>
+                  <td>
+                    {absence.isHourlyExpulsion ? "Ωριαία αποβολή" : ""}
+                    {absence.isHourlyExpulsion && absence.excusedReason ? " · " : ""}
+                    {absence.excusedReason ?? ""}
+                  </td>
                 </tr>
               ))}
               {student.sheetAbsences.length === 0 ? (

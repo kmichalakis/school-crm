@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Σχολικό CRM",
-  description: "Διαχείριση παρουσιών και απουσιών σχολείου"
+  title: "Mytilene Scholaris",
+  description: "Ψηφιακή ροή απουσιολογίου για το 1ο Πρότυπο Γυμνάσιο Μυτιλήνης"
 };
 
 export default function RootLayout({

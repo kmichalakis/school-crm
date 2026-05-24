@@ -42,9 +42,9 @@ async function main() {
     update: {},
     create: {
       id: "demo-school-year",
-      name: "2026-2027",
-      startsOn: new Date("2026-09-01"),
-      endsOn: new Date("2027-06-30")
+      name: "2025-2026",
+      startsOn: new Date("2025-09-01"),
+      endsOn: new Date("2026-06-30")
     }
   });
 
@@ -252,9 +252,9 @@ async function main() {
 
   const attendanceSheet = await prisma.attendanceSheet.upsert({
     where: {
-      classId_day_hour: {
+      classId_date_hour: {
         classId: classA1.id,
-        day: WeekDay.MONDAY,
+        date: new Date("2026-05-18T00:00:00.000Z"),
         hour: 1
       }
     },
@@ -265,6 +265,7 @@ async function main() {
     create: {
       classId: classA1.id,
       courseId: course.id,
+      date: new Date("2026-05-18T00:00:00.000Z"),
       day: WeekDay.MONDAY,
       hour: 1,
       teacherName: `${teacher.name} ${teacher.surname}`

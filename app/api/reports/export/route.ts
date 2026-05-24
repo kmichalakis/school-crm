@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     orderBy: [{ student: { surname: "asc" } }, { sheet: { day: "asc" } }, { sheet: { hour: "asc" } }]
   });
 
-  const header = ["Σχολικό έτος", "Τμήμα", "Μαθητής", "Ημέρα", "Ώρα", "Μάθημα", "Κατάσταση", "Λόγος δικαιολόγησης", "Αποθηκεύτηκε"];
+  const header = ["Σχολικό έτος", "Τμήμα", "Μαθητής", "Ημέρα", "Ώρα", "Μάθημα", "Κατάσταση", "Ωριαία αποβολή", "Λόγος δικαιολόγησης", "Αποθηκεύτηκε"];
   const rows = absences.map((absence) => [
     absence.sheet.class.schoolYear.name,
     absence.sheet.class.name,
@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
     hourLabel(absence.sheet.hour),
     absence.sheet.course.name,
     absenceStatusLabel(absence.status),
+    absence.isHourlyExpulsion ? "Ναι" : "Όχι",
     absence.excusedReason ?? "",
     absence.sheet.savedAt ? new Intl.DateTimeFormat("el-GR", { dateStyle: "short", timeStyle: "short" }).format(absence.sheet.savedAt) : ""
   ]);

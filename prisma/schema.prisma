@@ -59,15 +59,30 @@ enum ParentJustificationStatus {
 }
 
 model SchoolYear {
-  id        String           @id @default(cuid())
-  name      String
-  startsOn  DateTime
-  endsOn    DateTime
-  status    SchoolYearStatus @default(ACTIVE)
-  classes   Class[]
-  students  Student[]
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id           String              @id @default(cuid())
+  name         String
+  startsOn     DateTime
+  endsOn       DateTime
+  status       SchoolYearStatus    @default(ACTIVE)
+  classes      Class[]
+  students     Student[]
+  calendarDays SchoolCalendarDay[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model SchoolCalendarDay {
+  id           String     @id @default(cuid())
+  schoolYearId String
+  date         DateTime   @db.Date
+  isWorkingDay Boolean
+  note         String?
+  schoolYear   SchoolYear @relation(fields: [schoolYearId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([schoolYearId, date])
+  @@index([schoolYearId, isWorkingDay])
 }
 
 model Class {
@@ -165,6 +180,7 @@ model Course {
   name                   String
   classId                String
   isNoCourse             Boolean                 @default(false)
+  isSubstitution         Boolean                 @default(false)
   class                  Class                   @relation(fields: [classId], references: [id])
   teachers               CourseTeacher[]
   schedules              ScheduleSlot[]
@@ -237,6 +253,7 @@ model AttendanceSheet {
   id                    String                       @id @default(cuid())
   classId               String
   courseId              String
+  date                  DateTime                     @default(now()) @db.Date
   day                   WeekDay
   hour                  Int
   teacherName           String
@@ -251,8 +268,9 @@ model AttendanceSheet {
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
 
-  @@unique([classId, day, hour])
+  @@unique([classId, date, hour])
   @@index([classId, day])
+  @@index([classId, date])
 }
 
 model AttendanceSheetCourse {
@@ -278,6 +296,7 @@ model AttendanceSheetAbsence {
   studentId     String
   absent        Boolean         @default(true)
   status        AbsenceStatus   @default(MARKED)
+  isHourlyExpulsion Boolean     @default(false)
   excusedReason String?
   excusedAt     DateTime?
   updatedAt     DateTime        @default(now()) @updatedAt

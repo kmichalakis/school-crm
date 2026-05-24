@@ -29,9 +29,26 @@ function adminPath(message: string, type: "success" | "error" = "success") {
   return `/admin?${params.toString()}`;
 }
 
+function calendarPath(message: string, type: "success" | "error" = "success") {
+  const params = new URLSearchParams({
+    notice: message,
+    noticeType: type
+  });
+
+  return `/calendar?${params.toString()}`;
+}
+
 function finishAdminAction(message: string, type: "success" | "error" = "success"): never {
   revalidatePath("/admin");
   redirect(adminPath(message, type));
+}
+
+function finishCalendarAction(message: string, type: "success" | "error" = "success"): never {
+  revalidatePath("/calendar");
+  revalidatePath("/");
+  revalidatePath("/teacher");
+  revalidatePath("/print");
+  redirect(calendarPath(message, type));
 }
 
 function text(formData: FormData, key: string) {
@@ -55,6 +72,10 @@ function optionalText(formData: FormData, key: string) {
 
 function checked(formData: FormData, key: string) {
   return formData.get(key) === "on";
+}
+
+function dateOnly(value: string) {
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 function validateAdminPassword(password: string, username: string) {
@@ -110,8 +131,8 @@ export async function createSchoolYearAction(formData: FormData) {
   await requireAdmin();
   const isActive = checked(formData, "active");
   const name = requiredText(formData, "name", "σχολικό έτος");
-  const startsOn = new Date(requiredText(formData, "startsOn", "έναρξη"));
-  const endsOn = new Date(requiredText(formData, "endsOn", "λήξη"));
+  const startsOn = dateOnly(requiredText(formData, "startsOn", "έναρξη"));
+  const endsOn = dateOnly(requiredText(formData, "endsOn", "λήξη"));
 
   if (startsOn >= endsOn) {
     finishAdminAction("Η λήξη του σχολικού έτους πρέπει να είναι μετά την έναρξη.", "error");
@@ -133,7 +154,89 @@ export async function createSchoolYearAction(formData: FormData) {
     }
   });
 
-  revalidatePath("/admin");
+  finishAdminAction("Το σχολικό έτος προστέθηκε.");
+}
+
+export async function updateSchoolYearAction(formData: FormData) {
+  await requireAdmin();
+  const id = requiredText(formData, "id", "σχολικό έτος");
+  const name = requiredText(formData, "name", "σχολικό έτος");
+  const startsOn = dateOnly(requiredText(formData, "startsOn", "έναρξη"));
+  const endsOn = dateOnly(requiredText(formData, "endsOn", "λήξη"));
+  const isActive = checked(formData, "active");
+
+  if (startsOn >= endsOn) {
+    finishAdminAction("Η λήξη του σχολικού έτους πρέπει να είναι μετά την έναρξη.", "error");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (isActive) {
+      await tx.schoolYear.updateMany({
+        where: { status: SchoolYearStatus.ACTIVE, id: { not: id } },
+        data: { status: SchoolYearStatus.ARCHIVED }
+      });
+    }
+
+    await tx.schoolYear.update({
+      where: { id },
+      data: {
+        name,
+        startsOn,
+        endsOn,
+        status: isActive ? SchoolYearStatus.ACTIVE : SchoolYearStatus.ARCHIVED
+      }
+    });
+  });
+
+  finishAdminAction("Το σχολικό έτος ενημερώθηκε.");
+}
+
+export async function upsertCalendarDayAction(formData: FormData) {
+  await requireAdmin();
+  const schoolYearId = requiredText(formData, "schoolYearId", "σχολικό έτος");
+  const dateValue = requiredText(formData, "date", "ημερομηνία");
+  const isWorkingDay = requiredText(formData, "isWorkingDay", "κατάσταση") === "true";
+  const note = optionalText(formData, "note");
+  const schoolYear = await prisma.schoolYear.findUnique({ where: { id: schoolYearId } });
+
+  if (!schoolYear) {
+    finishCalendarAction("Δεν βρέθηκε το σχολικό έτος.", "error");
+  }
+
+  const date = dateOnly(dateValue);
+  if (date < schoolYear.startsOn || date > schoolYear.endsOn) {
+    finishCalendarAction("Η ημερομηνία πρέπει να είναι μέσα στα όρια του σχολικού έτους.", "error");
+  }
+
+  await prisma.schoolCalendarDay.upsert({
+    where: {
+      schoolYearId_date: {
+        schoolYearId,
+        date
+      }
+    },
+    update: {
+      isWorkingDay,
+      note
+    },
+    create: {
+      schoolYearId,
+      date,
+      isWorkingDay,
+      note
+    }
+  });
+
+  finishCalendarAction("Η ημερομηνία ενημερώθηκε στο ημερολόγιο.");
+}
+
+export async function deleteCalendarDayAction(formData: FormData) {
+  await requireAdmin();
+  const id = requiredText(formData, "id", "ημερομηνία ημερολογίου");
+
+  await prisma.schoolCalendarDay.delete({ where: { id } });
+
+  finishCalendarAction("Η εξαίρεση ημερολογίου αφαιρέθηκε.");
 }
 
 export async function upsertClassAction(formData: FormData) {

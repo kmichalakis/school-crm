@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ClassYear, WeekDay } from "@prisma/client";
+import { AppNavigation } from "@/app/app-navigation";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import { LogoutButton } from "@/app/logout-button";
 import {
   createSchoolYearAction,
   deleteClassAction,
@@ -16,6 +15,7 @@ import {
   importSchoolWorkbookAction,
   promoteSchoolYearAction,
   setScheduleSlotAction,
+  updateSchoolYearAction,
   upsertClassAction,
   upsertCourseAction,
   upsertParentAction,
@@ -30,8 +30,25 @@ type AdminPageProps = {
   searchParams: Promise<{
     notice?: string;
     noticeType?: string;
+    tab?: string;
   }>;
 };
+
+type AdminTab = "setup" | "classes" | "teachers" | "parents" | "students" | "courses" | "schedule";
+
+const adminTabs: Array<{ href: AdminTab; label: string }> = [
+  { href: "setup", label: "Έτη / Excel" },
+  { href: "classes", label: "Τμήματα" },
+  { href: "teachers", label: "Εκπαιδευτικοί" },
+  { href: "parents", label: "Γονείς" },
+  { href: "students", label: "Μαθητές" },
+  { href: "courses", label: "Μαθήματα" },
+  { href: "schedule", label: "Πρόγραμμα" }
+];
+
+function adminTabFromParam(tab: string | undefined): AdminTab {
+  return adminTabs.some((adminTab) => adminTab.href === tab) ? (tab as AdminTab) : "setup";
+}
 
 function dateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -69,7 +86,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   }
 
   const adminUser = await prisma.user.findUnique({
-    where: { id: session.userId }
+    where: { id: session.userId },
+    include: { teacher: true }
   });
 
   if (!adminUser || adminUser.role !== "ADMIN") {
@@ -139,37 +157,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const activeYear = schoolYears.find((schoolYear) => schoolYear.status === "ACTIVE") ?? schoolYears[0];
   const params = await searchParams;
   const noticeType = params.noticeType === "error" ? "error" : "success";
+  const activeTab = adminTabFromParam(params.tab);
+
+  const userLabel = adminUser.teacher ? `${adminUser.teacher.name} ${adminUser.teacher.surname}` : adminUser.username;
 
   return (
-    <main className="admin-shell">
-      <header className="admin-topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Διαχείριση σχολείου</h1>
-            <span>Δεδομένα ανά σχολικό έτος, τμήμα και πρόγραμμα</span>
-          </div>
-        </div>
-        <Link className="secondary-button" href="/">
-          Απουσιολόγιο
-        </Link>
-        <Link className="secondary-button" href="/notifications">
-          Ειδοποιήσεις
-        </Link>
-        <Link className="secondary-button" href="/dashboard">
-          Dashboard
-        </Link>
-        <Link className="secondary-button" href="/teacher">
-          Σήμερα
-        </Link>
-        <Link className="secondary-button" href="/print">
-          Εκτυπώσεις
-        </Link>
-        <Link className="secondary-button" href="/schedule">
-          Πρόγραμμα
-        </Link>
-        <LogoutButton />
-      </header>
+    <AppNavigation
+      active="admin"
+      role={adminUser.role}
+      title="Διαχείριση σχολείου"
+      subtitle="Δεδομένα ανά σχολικό έτος, τμήμα και πρόγραμμα"
+      userLabel={userLabel}
+    >
 
       {params.notice ? (
         <div className={`admin-notice ${noticeType}`} role="status">
@@ -177,24 +176,34 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         </div>
       ) : null}
 
-      <section className="admin-section">
-        <div className="admin-section-title">
-          <h2>Εισαγωγή δεδομένων από Excel</h2>
-          <p>Μαζική εισαγωγή τμημάτων, εκπαιδευτικών, γονέων, μαθητών, μαθημάτων και προγράμματος. Στο πρόγραμμα τα πολλά μαθήματα της ίδιας ώρας δηλώνονται με ΑΑ χωρισμένα με ;</p>
-        </div>
-        <form action={importSchoolWorkbookAction} className="admin-form import-form">
-          <input name="activeSchoolYearId" type="hidden" value={activeYear?.id ?? ""} />
-          <input name="workbook" type="file" accept=".xlsx,.xls" required />
-          <a className="secondary-button" href="/admin/import-template">
-            Λήψη προτύπου Excel
+      <nav className="admin-tabs" aria-label="Ενότητες διαχείρισης">
+        {adminTabs.map((tab) => (
+          <a className={activeTab === tab.href ? "admin-tab active" : "admin-tab"} href={`/admin?tab=${tab.href}`} key={tab.href}>
+            {tab.label}
           </a>
-          <button className="primary-button" type="submit">
-            Εισαγωγή Excel
-          </button>
-        </form>
-      </section>
+        ))}
+      </nav>
 
-      <section className="admin-section">
+      {activeTab === "setup" ? (
+        <>
+          <section className="admin-section">
+            <div className="admin-section-title">
+              <h2>Εισαγωγή δεδομένων από Excel</h2>
+              <p>Μαζική εισαγωγή τμημάτων, εκπαιδευτικών, γονέων, μαθητών, μαθημάτων και προγράμματος. Στο πρόγραμμα τα πολλά μαθήματα της ίδιας ώρας δηλώνονται με ΑΑ χωρισμένα με ;</p>
+            </div>
+            <form action={importSchoolWorkbookAction} className="admin-form import-form">
+              <input name="activeSchoolYearId" type="hidden" value={activeYear?.id ?? ""} />
+              <input name="workbook" type="file" accept=".xlsx,.xls" required />
+              <a className="secondary-button" href="/admin/import-template">
+                Λήψη προτύπου Excel
+              </a>
+              <button className="primary-button" type="submit">
+                Εισαγωγή Excel
+              </button>
+            </form>
+          </section>
+
+          <section className="admin-section">
         <div className="admin-section-title">
           <h2>Σχολικά έτη</h2>
           <p>Το ενεργό έτος καθορίζει τα τμήματα και τους μαθητές της τρέχουσας χρονιάς.</p>
@@ -215,13 +224,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
         <div className="admin-table">
           {schoolYears.map((schoolYear) => (
-            <div className="admin-row" key={schoolYear.id}>
-              <strong>{schoolYear.name}</strong>
-              <span>{schoolYear.status === "ACTIVE" ? "Ενεργό" : "Αρχείο"}</span>
-              <span>
-                {dateInputValue(schoolYear.startsOn)} έως {dateInputValue(schoolYear.endsOn)}
-              </span>
-            </div>
+            <form action={updateSchoolYearAction} className="admin-row editable-row" key={schoolYear.id}>
+              <input name="id" type="hidden" value={schoolYear.id} />
+              <input name="name" defaultValue={schoolYear.name} required />
+              <input name="startsOn" type="date" defaultValue={dateInputValue(schoolYear.startsOn)} required />
+              <input name="endsOn" type="date" defaultValue={dateInputValue(schoolYear.endsOn)} required />
+              <label className="check-field">
+                <input name="active" type="checkbox" defaultChecked={schoolYear.status === "ACTIVE"} />
+                Ενεργό
+              </label>
+              <button className="secondary-button" type="submit">
+                Αποθήκευση
+              </button>
+            </form>
           ))}
         </div>
 
@@ -245,8 +260,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </button>
           </form>
         ) : null}
-      </section>
+          </section>
+        </>
+      ) : null}
 
+      {activeTab === "classes" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Τμήματα</h2>
@@ -328,7 +346,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "teachers" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Εκπαιδευτικοί</h2>
@@ -398,7 +418,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "parents" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Γονείς</h2>
@@ -445,7 +467,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "students" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Μαθητές</h2>
@@ -511,7 +535,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "courses" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Μαθήματα</h2>
@@ -581,7 +607,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "schedule" ? (
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Πρόγραμμα</h2>
@@ -638,6 +666,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ))}
         </div>
       </section>
-    </main>
+      ) : null}
+    </AppNavigation>
   );
 }

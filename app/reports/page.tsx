@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus, ParentJustificationStatus } from "@prisma/client";
+import { AppNavigation } from "@/app/app-navigation";
 import {
   approveParentJustificationRequestAction,
   excuseAbsenceAction,
@@ -22,9 +23,16 @@ function dateLabel(date: Date | null) {
   }).format(date);
 }
 
-export default async function ReportsPage() {
+type ReportsPageProps = {
+  searchParams: Promise<{
+    classId?: string;
+  }>;
+};
+
+export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const cookieStore = await cookies();
   const session = parseSessionToken(cookieStore.get(sessionCookieName)?.value);
+  const params = await searchParams;
 
   if (!session || (session.role !== "ADMIN" && session.role !== "TEACHER")) {
     redirect("/");
@@ -39,83 +47,96 @@ export default async function ReportsPage() {
       ? await prisma.teacher.findUnique({
           where: { userId: session.userId },
           include: {
-            courses: {
-              include: {
-                course: true
-              }
+            responsibleClasses: {
+              include: { schoolYear: true },
+              orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
             }
           }
         })
       : null;
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    include: { teacher: true }
+  });
+  const userLabel = user?.teacher ? `${user.teacher.name} ${user.teacher.surname}` : user?.username ?? "Χρήστης";
 
-  const allowedClassIds =
+  const classChoices =
     session.role === "ADMIN"
-      ? undefined
-      : Array.from(
-          new Set([
-            ...(teacher?.homeClassId ? [teacher.homeClassId] : []),
-            ...(teacher?.courses.map((courseLink) => courseLink.course.classId) ?? [])
-          ])
-        );
+      ? await prisma.class.findMany({
+          include: { schoolYear: true },
+          orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
+        })
+      : teacher?.responsibleClasses ?? [];
+  const selectedClass =
+    session.role === "TEACHER" && classChoices.length === 1 && !params.classId
+      ? classChoices[0]
+      : classChoices.find((classRecord) => classRecord.id === params.classId) ?? null;
+  const shouldShowClassPicker = session.role === "ADMIN" || classChoices.length > 1;
 
   const [classes, absences, justificationRequests] = await Promise.all([
-    prisma.class.findMany({
-      where: allowedClassIds ? { id: { in: allowedClassIds } } : undefined,
-      include: {
-        schoolYear: true,
-        students: true
-      },
-      orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
-    }),
-    prisma.attendanceSheetAbsence.findMany({
-      where: {
-        absent: true,
-        status: { not: AbsenceStatus.REMOVED },
-        sheet: allowedClassIds ? { classId: { in: allowedClassIds } } : undefined
-      },
-      include: {
-        student: {
+    selectedClass
+      ? prisma.class.findMany({
+          where: { id: selectedClass.id },
           include: {
-            class: {
-              include: { schoolYear: true }
-            }
-          }
-        },
-        sheet: {
+            schoolYear: true,
+            students: true
+          },
+          orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
+        })
+      : Promise.resolve([]),
+    selectedClass
+      ? prisma.attendanceSheetAbsence.findMany({
+          where: {
+            absent: true,
+            status: { not: AbsenceStatus.REMOVED },
+            sheet: { classId: selectedClass.id }
+          },
           include: {
-            class: {
-              include: { schoolYear: true }
+            student: {
+              include: {
+                class: {
+                  include: { schoolYear: true }
+                }
+              }
             },
-            course: true
-          }
-        }
-      },
-      orderBy: [{ sheet: { day: "asc" } }, { sheet: { hour: "asc" } }, { student: { surname: "asc" } }]
-    }),
-    prisma.parentJustificationRequest.findMany({
-      where: {
-        sheet: allowedClassIds ? { classId: { in: allowedClassIds } } : undefined
-      },
-      include: {
-        parent: true,
-        student: {
-          include: {
-            class: {
-              include: { schoolYear: true }
+            sheet: {
+              include: {
+                class: {
+                  include: { schoolYear: true }
+                },
+                course: true
+              }
             }
-          }
-        },
-        sheet: {
+          },
+          orderBy: [{ sheet: { day: "asc" } }, { sheet: { hour: "asc" } }, { student: { surname: "asc" } }]
+        })
+      : Promise.resolve([]),
+    selectedClass
+      ? prisma.parentJustificationRequest.findMany({
+          where: {
+            sheet: { classId: selectedClass.id }
+          },
           include: {
-            class: {
-              include: { schoolYear: true }
+            parent: true,
+            student: {
+              include: {
+                class: {
+                  include: { schoolYear: true }
+                }
+              }
             },
-            course: true
-          }
-        }
-      },
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }]
-    })
+            sheet: {
+              include: {
+                class: {
+                  include: { schoolYear: true }
+                },
+                course: true
+              }
+            }
+          },
+          orderBy: [{ status: "asc" }, { createdAt: "desc" }]
+        })
+      : Promise.resolve([])
   ]);
 
   const summaryByStudent = new Map<
@@ -159,39 +180,46 @@ export default async function ReportsPage() {
   const pendingRequestCount = justificationRequests.filter((request) => request.status === ParentJustificationStatus.PENDING).length;
 
   return (
-    <main className="admin-shell">
-      <header className="admin-topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Αναφορές απουσιών</h1>
-            <span>Σύνολα, δικαιολογήσεις και εξαγωγές ανά μαθητή</span>
+    <AppNavigation
+      active="reports"
+      role={session.role}
+      title="Αναφορές απουσιών"
+      subtitle="Σύνολα, δικαιολογήσεις και εξαγωγές ανά μαθητή"
+      userLabel={userLabel}
+    >
+      {shouldShowClassPicker ? (
+        <section className="admin-section">
+          <div className="admin-section-title">
+            <h2>Τμήμα</h2>
+            <p>
+              {session.role === "ADMIN"
+                ? "Επιλέξτε τμήμα για προβολή αναφορών."
+                : "Εμφανίζονται μόνο τμήματα στα οποία είστε υπεύθυνος/η."}
+            </p>
           </div>
-        </div>
-        <div className="status-row">
-          <Link className="secondary-button" href="/">
-            Απουσιολόγιο
-          </Link>
-          <Link className="secondary-button" href="/schedule">
-            Πρόγραμμα
-          </Link>
-          <Link className="secondary-button" href="/dashboard">
-            Dashboard
-          </Link>
-          <Link className="secondary-button" href="/print">
-            Εκτυπώσεις
-          </Link>
-          {session.role === "ADMIN" ? (
-            <Link className="secondary-button" href="/admin">
-              Διαχείριση
-            </Link>
-          ) : null}
-          <Link className="primary-button" href="/api/reports/export">
-            CSV εξαγωγή
-          </Link>
-        </div>
-      </header>
+          <div className="class-tabs">
+            {classChoices.map((classRecord) => (
+              <Link
+                className={selectedClass?.id === classRecord.id ? "class-tab active" : "class-tab"}
+                href={`/reports?classId=${classRecord.id}`}
+                key={classRecord.id}
+              >
+                {classRecord.name}
+                <span>{classRecord.schoolYear.name}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
+      {classChoices.length === 0 ? <div className="empty-state">Δεν είστε υπεύθυνος/η σε κάποιο τμήμα.</div> : null}
+
+      {classChoices.length > 0 && !selectedClass ? (
+        <div className="empty-state">Επιλέξτε τμήμα για να εμφανιστούν οι αναφορές.</div>
+      ) : null}
+
+      {selectedClass ? (
+      <>
       <div className="summary-grid">
         <div className="panel metric">
           <span>Τμήματα</span>
@@ -324,7 +352,10 @@ export default async function ReportsPage() {
                 </div>
                 <div>
                   <strong>{absence.sheet.course.name}</strong>
-                  <span>{dateLabel(absence.sheet.savedAt)}</span>
+                  <span>
+                    {dateLabel(absence.sheet.savedAt)}
+                    {absence.isHourlyExpulsion ? " · Ωριαία αποβολή" : ""}
+                  </span>
                 </div>
                 <span className={absence.status === AbsenceStatus.EXCUSED ? "sync-pill ready" : "sync-pill"}>
                   {absenceStatusLabel(absence.status)}
@@ -359,6 +390,8 @@ export default async function ReportsPage() {
           ))}
         </div>
       </section>
-    </main>
+      </>
+      ) : null}
+    </AppNavigation>
   );
 }

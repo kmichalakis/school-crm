@@ -1,14 +1,16 @@
 import { AttendanceBoard } from "@/app/attendance-board";
 import { LoginForm } from "@/app/login-form";
+import { clampToSchoolYear, dateInputValue, isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import { schoolHours, weekDays } from "@/lib/school-time";
+import { dateToWeekDay, formatDateInput, schoolHours, weekDays } from "@/lib/school-time";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 type HomeProps = {
   searchParams: Promise<{
     classId?: string;
+    date?: string;
     day?: string;
     hour?: string;
   }>;
@@ -25,14 +27,21 @@ function validInitialHour(hour: string | undefined) {
 }
 
 function currentGreekSchoolSelection() {
+  const now = new Date();
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Athens",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
-  }).formatToParts(new Date());
+  }).formatToParts(now);
   const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const monthDay = Number(parts.find((part) => part.type === "day")?.value);
   const hour = Number(parts.find((part) => part.type === "hour")?.value);
   const minute = Number(parts.find((part) => part.type === "minute")?.value);
   const dayByWeekday: Record<string, string> = {
@@ -43,9 +52,22 @@ function currentGreekSchoolSelection() {
     Fri: "FRIDAY"
   };
   const day = weekday ? dayByWeekday[weekday] : undefined;
+  const greekDate = Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(monthDay)
+    ? new Date(year, month - 1, monthDay)
+    : new Date();
+
+  function nextSchoolDate(fromDate: Date) {
+    const nextDate = new Date(fromDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    while (nextDate.getDay() === 0 || nextDate.getDay() === 6) {
+      nextDate.setDate(nextDate.getDate() + 1);
+    }
+    return nextDate;
+  }
 
   if (!day || !Number.isFinite(hour) || !Number.isFinite(minute)) {
-    return { day: "MONDAY", hour: 1 };
+    const nextDate = nextSchoolDate(greekDate);
+    return { date: formatDateInput(nextDate), day: dateToWeekDay(formatDateInput(nextDate)) ?? "MONDAY", hour: 1 };
   }
 
   const minutes = hour * 60 + minute;
@@ -58,11 +80,62 @@ function currentGreekSchoolSelection() {
     return minutes >= start && minutes <= end;
   });
 
-  return { day, hour: schoolHour?.hour ?? 1 };
+  const lastHour = schoolHours.at(-1);
+  if (lastHour) {
+    const [lastEndHour, lastEndMinute] = lastHour.ends.split(":").map(Number);
+    if (minutes > lastEndHour * 60 + lastEndMinute) {
+      const nextDate = nextSchoolDate(greekDate);
+      return { date: formatDateInput(nextDate), day: dateToWeekDay(formatDateInput(nextDate)) ?? "MONDAY", hour: 1 };
+    }
+  }
+
+  return { date: formatDateInput(greekDate), day, hour: schoolHour?.hour ?? 1 };
 }
 
-function initialDay(day: string | undefined) {
-  return day && weekDays.some((weekDay) => weekDay.value === day) ? day : currentGreekSchoolSelection().day;
+function nearestAllowedAttendanceDate(
+  dateValue: string,
+  bounds: SchoolYearDateBounds | null,
+  calendarExceptions: SchoolCalendarException[]
+) {
+  const startDate = new Date(`${clampToSchoolYear(dateValue, bounds)}T12:00:00`);
+
+  for (let offset = 0; offset <= 370; offset += 1) {
+    const nextDate = new Date(startDate);
+    nextDate.setDate(nextDate.getDate() + offset);
+    const nextValue = formatDateInput(nextDate);
+    if (dateToWeekDay(nextValue) && isAllowedSchoolDate(nextValue, bounds, calendarExceptions)) {
+      return nextValue;
+    }
+  }
+
+  for (let offset = 1; offset <= 370; offset += 1) {
+    const previousDate = new Date(startDate);
+    previousDate.setDate(previousDate.getDate() - offset);
+    const previousValue = formatDateInput(previousDate);
+    if (dateToWeekDay(previousValue) && isAllowedSchoolDate(previousValue, bounds, calendarExceptions)) {
+      return previousValue;
+    }
+  }
+
+  return clampToSchoolYear(dateValue, bounds);
+}
+
+function validInitialDate(
+  date: string | undefined,
+  bounds: SchoolYearDateBounds | null,
+  calendarExceptions: SchoolCalendarException[]
+) {
+  const candidate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : currentGreekSchoolSelection().date;
+  const clampedCandidate = clampToSchoolYear(candidate, bounds);
+  if (dateToWeekDay(clampedCandidate) && isAllowedSchoolDate(clampedCandidate, bounds, calendarExceptions)) {
+    return clampedCandidate;
+  }
+
+  return nearestAllowedAttendanceDate(clampedCandidate, bounds, calendarExceptions);
+}
+
+function initialDay(date: string, day: string | undefined) {
+  return dateToWeekDay(date) ?? (day && weekDays.some((weekDay) => weekDay.value === day) ? day : currentGreekSchoolSelection().day);
 }
 
 export default async function Home({ searchParams }: HomeProps) {
@@ -97,6 +170,23 @@ export default async function Home({ searchParams }: HomeProps) {
   }
 
   const isClassTablet = user.role === "CLASS_TABLET";
+  const activeYear = await prisma.schoolYear.findFirst({
+    where: { status: "ACTIVE" },
+    include: { calendarDays: true },
+    orderBy: { startsOn: "desc" }
+  });
+  const schoolYearBounds = activeYear
+    ? {
+        startsOn: dateInputValue(activeYear.startsOn),
+        endsOn: dateInputValue(activeYear.endsOn)
+      }
+    : null;
+  const calendarExceptions = activeYear
+    ? activeYear.calendarDays.map((calendarDay) => ({
+        date: dateInputValue(calendarDay.date),
+        isWorkingDay: calendarDay.isWorkingDay
+      }))
+    : [];
   const adminClasses =
     user.role === "ADMIN"
       ? await prisma.class.findMany({
@@ -128,14 +218,16 @@ export default async function Home({ searchParams }: HomeProps) {
           id: classRecord.id,
           name: classRecord.name,
           grade: classRecord.year === "B" ? "Β" : classRecord.year === "C" ? "Γ" : "Α",
-          schoolYear: classRecord.schoolYear.name
+          schoolYear: classRecord.schoolYear.name,
+          isResponsible: false
         }))
       : teacherClasses.length > 0
         ? teacherClasses.map((classRecord) => ({
             id: classRecord.id,
             name: classRecord.name,
             grade: classRecord.year === "B" ? "Β" : classRecord.year === "C" ? "Γ" : "Α",
-            schoolYear: classRecord.schoolYear.name
+            schoolYear: classRecord.schoolYear.name,
+            isResponsible: classRecord.responsibleTeacherId === user.teacher?.id
           }))
       : user.class
         ? [
@@ -143,7 +235,8 @@ export default async function Home({ searchParams }: HomeProps) {
               id: user.class.id,
               name: user.class.name,
               grade: user.class.year === "B" ? "Β" : user.class.year === "C" ? "Γ" : "Α",
-              schoolYear: user.class.schoolYear.name
+              schoolYear: user.class.schoolYear.name,
+              isResponsible: false
             }
           ]
         : [
@@ -151,23 +244,31 @@ export default async function Home({ searchParams }: HomeProps) {
               id: "class-a1",
               name: "Α1",
               grade: "Α",
-              schoolYear: "2026-2027"
+              schoolYear: "2025-2026",
+              isResponsible: false
             }
           ];
   const userLabel = user.teacher ? `${user.teacher.name} ${user.teacher.surname}` : user.class ? `Τάξη ${user.class.name}` : user.username;
   const requestedClass = availableClasses.find((classRecord) => classRecord.id === params.classId);
   const initialClassId = requestedClass?.id ?? user.classId ?? availableClasses[0]?.id ?? "class-a1";
+  const selectedDate = validInitialDate(params.date, schoolYearBounds, calendarExceptions);
+  const selectedDay = initialDay(selectedDate, params.day);
 
   return (
     <AttendanceBoard
       initialMode={isClassTablet ? "tablet" : "teacher"}
       userLabel={userLabel}
       initialClassId={initialClassId}
-      initialDay={initialDay(params.day)}
+      initialDate={selectedDate}
+      initialDay={selectedDay}
       initialHour={validInitialHour(params.hour)}
       availableClasses={availableClasses}
       username={user.username}
       isAdmin={user.role === "ADMIN"}
+      currentTeacherId={user.teacher?.id ?? null}
+      showClassSelection={user.role === "TEACHER" && !params.classId}
+      schoolYearBounds={schoolYearBounds}
+      calendarExceptions={calendarExceptions}
     />
   );
 }

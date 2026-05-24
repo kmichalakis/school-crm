@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { EmailTrigger, ParentNotificationStatus } from "@prisma/client";
+import { AppNavigation } from "@/app/app-navigation";
 import {
   generateParentNotificationsAction,
   markAllQueuedSentAction,
@@ -44,6 +44,11 @@ export default async function NotificationsPage() {
           }
         })
       : null;
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    include: { teacher: true }
+  });
+  const userLabel = user?.teacher ? `${user.teacher.name} ${user.teacher.surname}` : user?.username ?? "Χρήστης";
 
   const allowedClassIds =
     session.role === "ADMIN"
@@ -80,32 +85,13 @@ export default async function NotificationsPage() {
   const dismissedCount = notifications.filter((notification) => notification.status === ParentNotificationStatus.DISMISSED).length;
 
   return (
-    <main className="admin-shell">
-      <header className="admin-topbar">
-        <div className="brand">
-          <div className="brand-mark">ΣΧ</div>
-          <div>
-            <h1>Ειδοποιήσεις γονέων</h1>
-            <span>Προεπισκόπηση και παρακολούθηση ενημερώσεων απουσιών</span>
-          </div>
-        </div>
-        <div className="status-row">
-          <Link className="secondary-button" href="/">
-            Απουσιολόγιο
-          </Link>
-          <Link className="secondary-button" href="/schedule">
-            Πρόγραμμα
-          </Link>
-          <Link className="secondary-button" href="/reports">
-            Αναφορές
-          </Link>
-          {session.role === "ADMIN" ? (
-            <Link className="secondary-button" href="/admin">
-              Διαχείριση
-            </Link>
-          ) : null}
-        </div>
-      </header>
+    <AppNavigation
+      active="notifications"
+      role={session.role}
+      title="Ειδοποιήσεις γονέων"
+      subtitle="Προεπισκόπηση και παρακολούθηση ενημερώσεων απουσιών"
+      userLabel={userLabel}
+    >
 
       <div className="summary-grid">
         <div className="panel metric">
@@ -259,6 +245,6 @@ export default async function NotificationsPage() {
           )}
         </div>
       </section>
-    </main>
+    </AppNavigation>
   );
 }
