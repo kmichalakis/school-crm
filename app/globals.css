@@ -312,6 +312,33 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.danger-zone-form {
+  grid-template-columns: minmax(240px, 2fr) minmax(180px, 1fr) minmax(200px, 1fr) auto;
+  align-items: end;
+  padding-top: 14px;
+  border-top: 1px solid #efc9bd;
+}
+
+.danger-zone-copy {
+  display: grid;
+  gap: 4px;
+  align-self: center;
+}
+
+.danger-zone-copy h3 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 16px;
+}
+
+.danger-zone-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .admin-form input,
 .admin-form select,
 .admin-row input,
@@ -1766,6 +1793,7 @@ button:disabled {
   .grid-form,
   .import-form,
   .promote-form,
+  .danger-zone-form,
   .admin-row,
     .editable-row,
     .schedule-admin-row,

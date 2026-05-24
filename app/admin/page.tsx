@@ -10,6 +10,7 @@ import {
   deleteCourseAction,
   deleteParentAction,
   deleteScheduleSlotAction,
+  deleteSchoolYearDataAction,
   deleteStudentAction,
   deleteTeacherAction,
   importSchoolWorkbookAction,
@@ -257,6 +258,36 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </div>
             <button className="primary-button" type="submit">
               Μετάβαση στο επόμενο έτος
+            </button>
+          </form>
+        ) : null}
+
+        {schoolYears.length > 0 ? (
+          <form action={deleteSchoolYearDataAction} className="admin-form danger-zone-form">
+            <div className="danger-zone-copy">
+              <h3>Delete all σχολικού έτους</h3>
+              <p>
+                Διαγράφει το επιλεγμένο σχολικό έτος μαζί με τμήματα, μαθητές, μαθήματα, πρόγραμμα, απουσιολόγια, αργίες και λογαριασμούς τμημάτων.
+                Κρατά admin λογαριασμούς και καθαρίζει ορφανούς γονείς/εκπαιδευτικούς που δεν συνδέονται πλέον με δεδομένα.
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="deleteSchoolYearId">Σχολικό έτος</label>
+              <select id="deleteSchoolYearId" name="schoolYearId" defaultValue={activeYear?.id ?? schoolYears[0]?.id} required>
+                {schoolYears.map((schoolYear) => (
+                  <option key={schoolYear.id} value={schoolYear.id}>
+                    {schoolYear.name}
+                    {schoolYear.status === "ACTIVE" ? " (ενεργό)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="deleteConfirmation">Επιβεβαίωση</label>
+              <input id="deleteConfirmation" name="confirmation" placeholder="Πληκτρολογήστε ΔΙΑΓΡΑΦΗ" required />
+            </div>
+            <button className="secondary-button danger" type="submit">
+              Delete all
             </button>
           </form>
         ) : null}

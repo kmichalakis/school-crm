@@ -191,6 +191,171 @@ export async function updateSchoolYearAction(formData: FormData) {
   finishAdminAction("Το σχολικό έτος ενημερώθηκε.");
 }
 
+export async function deleteSchoolYearDataAction(formData: FormData) {
+  const session = await requireAdmin();
+  const schoolYearId = requiredText(formData, "schoolYearId", "σχολικό έτος");
+  const confirmation = requiredText(formData, "confirmation", "επιβεβαίωση");
+
+  if (confirmation !== "ΔΙΑΓΡΑΦΗ") {
+    finishAdminAction("Για διαγραφή σχολικού έτους πληκτρολογήστε ακριβώς: ΔΙΑΓΡΑΦΗ.", "error");
+  }
+
+  const schoolYear = await prisma.schoolYear.findUnique({
+    where: { id: schoolYearId },
+    select: { id: true, name: true }
+  });
+
+  if (!schoolYear) {
+    finishAdminAction("Δεν βρέθηκε το σχολικό έτος για διαγραφή.", "error");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const classes = await tx.class.findMany({
+      where: { schoolYearId },
+      select: { id: true, responsibleTeacherId: true }
+    });
+    const classIds = classes.map((classRecord) => classRecord.id);
+
+    const students = await tx.student.findMany({
+      where: { schoolYearId },
+      select: { id: true, parentId: true }
+    });
+    const studentIds = students.map((student) => student.id);
+    const affectedParentIds = Array.from(new Set(students.map((student) => student.parentId).filter((id): id is string => Boolean(id))));
+
+    const courses = await tx.course.findMany({
+      where: { classId: { in: classIds } },
+      select: { id: true }
+    });
+    const courseIds = courses.map((course) => course.id);
+
+    const scheduleSlots = await tx.scheduleSlot.findMany({
+      where: {
+        OR: [{ classId: { in: classIds } }, { courseId: { in: courseIds } }]
+      },
+      select: { id: true }
+    });
+    const scheduleSlotIds = scheduleSlots.map((slot) => slot.id);
+
+    const attendanceSheets = await tx.attendanceSheet.findMany({
+      where: {
+        OR: [{ classId: { in: classIds } }, { courseId: { in: courseIds } }]
+      },
+      select: { id: true }
+    });
+    const attendanceSheetIds = attendanceSheets.map((sheet) => sheet.id);
+
+    const [courseTeachers, attendanceSheetTeachers, signatureTeachers, homeClassTeachers] = await Promise.all([
+      tx.courseTeacher.findMany({
+        where: { courseId: { in: courseIds } },
+        select: { teacherId: true }
+      }),
+      tx.attendanceSheetCourse.findMany({
+        where: {
+          OR: [{ sheetId: { in: attendanceSheetIds } }, { courseId: { in: courseIds } }]
+        },
+        select: { teacherId: true }
+      }),
+      tx.attendanceSignature.findMany({
+        where: {
+          OR: [{ scheduleSlotId: { in: scheduleSlotIds } }, { courseId: { in: courseIds } }]
+        },
+        select: { teacherId: true }
+      }),
+      tx.teacher.findMany({
+        where: { homeClassId: { in: classIds } },
+        select: { id: true }
+      })
+    ]);
+    const affectedTeacherIds = Array.from(new Set([
+      ...classes.map((classRecord) => classRecord.responsibleTeacherId),
+      ...courseTeachers.map((courseTeacher) => courseTeacher.teacherId),
+      ...attendanceSheetTeachers.map((sheetTeacher) => sheetTeacher.teacherId),
+      ...signatureTeachers.map((signatureTeacher) => signatureTeacher.teacherId),
+      ...homeClassTeachers.map((teacher) => teacher.id)
+    ].filter((id): id is string => Boolean(id))));
+
+    await tx.parentNotification.deleteMany({
+      where: {
+        OR: [{ studentId: { in: studentIds } }, { sheetId: { in: attendanceSheetIds } }]
+      }
+    });
+    await tx.parentJustificationRequest.deleteMany({
+      where: {
+        OR: [{ studentId: { in: studentIds } }, { sheetId: { in: attendanceSheetIds } }]
+      }
+    });
+    await tx.excusedAbsencePeriod.deleteMany({ where: { studentId: { in: studentIds } } });
+    await tx.attendanceSheetAbsence.deleteMany({
+      where: {
+        OR: [{ studentId: { in: studentIds } }, { sheetId: { in: attendanceSheetIds } }]
+      }
+    });
+    await tx.attendanceSheetCourse.deleteMany({
+      where: {
+        OR: [{ sheetId: { in: attendanceSheetIds } }, { courseId: { in: courseIds } }]
+      }
+    });
+    await tx.absence.deleteMany({
+      where: {
+        OR: [{ studentId: { in: studentIds } }, { scheduleSlotId: { in: scheduleSlotIds } }]
+      }
+    });
+    await tx.attendanceSignature.deleteMany({
+      where: {
+        OR: [{ scheduleSlotId: { in: scheduleSlotIds } }, { courseId: { in: courseIds } }]
+      }
+    });
+    await tx.attendanceSheet.deleteMany({ where: { id: { in: attendanceSheetIds } } });
+    await tx.scheduleSlot.deleteMany({ where: { id: { in: scheduleSlotIds } } });
+    await tx.courseTeacher.deleteMany({ where: { courseId: { in: courseIds } } });
+    await tx.course.deleteMany({ where: { id: { in: courseIds } } });
+    await tx.student.deleteMany({ where: { id: { in: studentIds } } });
+    await tx.user.deleteMany({ where: { classId: { in: classIds }, role: UserRole.CLASS_TABLET } });
+    await tx.teacher.updateMany({ where: { homeClassId: { in: classIds } }, data: { homeClassId: null } });
+    await tx.class.deleteMany({ where: { id: { in: classIds } } });
+    await tx.schoolCalendarDay.deleteMany({ where: { schoolYearId } });
+    await tx.schoolYear.delete({ where: { id: schoolYearId } });
+
+    const orphanParents = await tx.parent.findMany({
+      where: {
+        id: { in: affectedParentIds },
+        students: { none: {} },
+        notifications: { none: {} },
+        justificationRequests: { none: {} },
+        user: { role: UserRole.PARENT }
+      },
+      select: { id: true, userId: true }
+    });
+    const orphanParentIds = orphanParents.map((parent) => parent.id);
+    const orphanParentUserIds = orphanParents.map((parent) => parent.userId);
+
+    await tx.parent.deleteMany({ where: { id: { in: orphanParentIds } } });
+    await tx.user.deleteMany({ where: { id: { in: orphanParentUserIds }, role: UserRole.PARENT } });
+
+    const orphanTeachers = await tx.teacher.findMany({
+      where: {
+        id: { in: affectedTeacherIds },
+        isAdmin: false,
+        userId: { not: session.userId },
+        user: { role: UserRole.TEACHER },
+        courses: { none: {} },
+        responsibleClasses: { none: {} },
+        attendanceSheetCourses: { none: {} },
+        signatures: { none: {} }
+      },
+      select: { id: true, userId: true }
+    });
+    const orphanTeacherIds = orphanTeachers.map((teacher) => teacher.id);
+    const orphanTeacherUserIds = orphanTeachers.map((teacher) => teacher.userId);
+
+    await tx.teacher.deleteMany({ where: { id: { in: orphanTeacherIds } } });
+    await tx.user.deleteMany({ where: { id: { in: orphanTeacherUserIds }, role: UserRole.TEACHER } });
+  }, { maxWait: 15000, timeout: 60000 });
+
+  finishAdminAction(`Το σχολικό έτος ${schoolYear.name} και τα συνδεδεμένα δεδομένα του διαγράφηκαν.`);
+}
+
 export async function upsertCalendarDayAction(formData: FormData) {
   await requireAdmin();
   const schoolYearId = requiredText(formData, "schoolYearId", "σχολικό έτος");
