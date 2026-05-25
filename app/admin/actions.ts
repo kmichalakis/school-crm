@@ -938,26 +938,42 @@ export async function importSchoolWorkbookAction(formData: FormData) {
     const parentByUsername = new Map<string, string>();
     const classByKey = new Map<string, string>();
     const courseByKey = new Map<string, string>();
+    const schoolYearByName = new Map<string, { id: string; name: string; startsOn: Date; endsOn: Date; status: SchoolYearStatus }>();
+    let defaultSchoolYear: { id: string; name: string; startsOn: Date; endsOn: Date; status: SchoolYearStatus } | null = null;
     async function resolveSchoolYear(name: string) {
       if (name) {
+        const mapped = schoolYearByName.get(name);
+        if (mapped) {
+          return mapped;
+        }
+
         const existing = await tx.schoolYear.findFirst({ where: { name } });
         if (existing) {
+          schoolYearByName.set(name, existing);
           return existing;
         }
 
         const dates = schoolYearDatesFromName(name);
-        return tx.schoolYear.create({
+        const created = await tx.schoolYear.create({
           data: {
             name,
             startsOn: dates.startsOn,
             endsOn: dates.endsOn
           }
         });
+        schoolYearByName.set(name, created);
+        return created;
       }
 
-      return activeSchoolYearId
-        ? tx.schoolYear.findUnique({ where: { id: activeSchoolYearId } })
-        : tx.schoolYear.findFirst({ orderBy: { startsOn: "desc" } });
+      if (defaultSchoolYear) {
+        return defaultSchoolYear;
+      }
+
+      defaultSchoolYear = activeSchoolYearId
+        ? await tx.schoolYear.findUnique({ where: { id: activeSchoolYearId } })
+        : await tx.schoolYear.findFirst({ orderBy: { startsOn: "desc" } });
+
+      return defaultSchoolYear;
     }
     async function teacherIdByAm(am: string) {
       if (!am) return undefined;
@@ -1016,7 +1032,7 @@ export async function importSchoolWorkbookAction(formData: FormData) {
 
       const existingYear = await tx.schoolYear.findFirst({ where: { name } });
       if (existingYear) {
-        await tx.schoolYear.update({
+        const updatedYear = await tx.schoolYear.update({
           where: { id: existingYear.id },
           data: {
             startsOn,
@@ -1024,8 +1040,9 @@ export async function importSchoolWorkbookAction(formData: FormData) {
             ...(active ? { status: SchoolYearStatus.ACTIVE } : {})
           }
         });
+        schoolYearByName.set(name, updatedYear);
       } else {
-        await tx.schoolYear.create({
+        const createdYear = await tx.schoolYear.create({
           data: {
             name,
             startsOn,
@@ -1033,6 +1050,7 @@ export async function importSchoolWorkbookAction(formData: FormData) {
             status: active ? SchoolYearStatus.ACTIVE : SchoolYearStatus.ARCHIVED
           }
         });
+        schoolYearByName.set(name, createdYear);
       }
       schoolYearsImported += 1;
     }
@@ -1217,30 +1235,29 @@ export async function importSchoolWorkbookAction(formData: FormData) {
 
       const parentUsername = cell(row, ["γονέας", "parent", "parentUsername"]).toLowerCase();
       const parentId = await parentIdByUsername(parentUsername);
-      const existingStudent = await tx.student.findFirst({
-        where: { am, schoolYearId: schoolYear.id }
-      });
-
-      if (existingStudent) {
-        await tx.student.update({
-          where: { id: existingStudent.id },
-          data: { name, surname, patronymic, classId, parentId }
-        });
-      } else {
-        await tx.student.create({
-          data: {
-            am,
-            name,
-            surname,
-            patronymic,
-            classId,
+      await tx.student.upsert({
+        where: {
+          schoolYearId_am: {
             schoolYearId: schoolYear.id,
-            parentId
+            am
           }
-        });
-      }
+        },
+        update: { name, surname, patronymic, classId, parentId },
+        create: {
+          am,
+          name,
+          surname,
+          patronymic,
+          classId,
+          schoolYearId: schoolYear.id,
+          parentId
+        }
+      });
       studentsImported += 1;
     }
+
+    const importedCourseIds: string[] = [];
+    const courseTeacherLinks: Array<{ courseId: string; teacherId: string }> = [];
 
     for (const row of courseRows) {
       const aa = codeValue(cell(row, ["ΑΑ", "aa", "κωδικός μαθήματος"]));
@@ -1276,19 +1293,30 @@ export async function importSchoolWorkbookAction(formData: FormData) {
         }
       });
 
-      await tx.courseTeacher.deleteMany({ where: { courseId: course.id } });
+      importedCourseIds.push(course.id);
       const teacherReference = cell(row, ["εκπαιδευτικός", "εκπαιδευτικοί", "teacher", "teachers", "teacherAm", "teacherAms", "ΑΜ εκπαιδευτικού", "ΑΜ εκπαιδευτικών"]);
       const teacherId = await teacherIdByReference(teacherReference);
 
       if (teacherId) {
-        await tx.courseTeacher.create({
-          data: { courseId: course.id, teacherId }
-        });
+        courseTeacherLinks.push({ courseId: course.id, teacherId });
       }
       courseByKey.set(`${schoolYear.name}:${className}:${aa}`, course.id);
       courseByKey.set(`${schoolYear.name}:${className}:${name}`, course.id);
       coursesImported += 1;
     }
+
+    if (importedCourseIds.length > 0) {
+      await tx.courseTeacher.deleteMany({ where: { courseId: { in: importedCourseIds } } });
+    }
+
+    if (courseTeacherLinks.length > 0) {
+      await tx.courseTeacher.createMany({
+        data: courseTeacherLinks,
+        skipDuplicates: true
+      });
+    }
+
+    const scheduleGroups = new Map<string, { classId: string; day: WeekDay; hour: number; courseIds: Set<string> }>();
 
     for (const row of scheduleRows) {
       const className = cell(row, ["τμήμα", "class"]);
@@ -1328,16 +1356,45 @@ export async function importSchoolWorkbookAction(formData: FormData) {
         continue;
       }
 
-      const existingSlots = await tx.scheduleSlot.findMany({ where: { classId, day, hour }, select: { id: true } });
+      const groupKey = `${classId}:${day}:${hour}`;
+      const group = scheduleGroups.get(groupKey) ?? { classId, day, hour, courseIds: new Set<string>() };
+      for (const courseId of uniqueCourseIds) {
+        group.courseIds.add(courseId);
+      }
+      scheduleGroups.set(groupKey, group);
+    }
+
+    const scheduleGroupList = Array.from(scheduleGroups.values());
+    if (scheduleGroupList.length > 0) {
+      const existingSlots = await tx.scheduleSlot.findMany({
+        where: {
+          OR: scheduleGroupList.map((group) => ({
+            classId: group.classId,
+            day: group.day,
+            hour: group.hour
+          }))
+        },
+        select: { id: true }
+      });
       const existingSlotIds = existingSlots.map((slot) => slot.id);
       await tx.absence.deleteMany({ where: { scheduleSlotId: { in: existingSlotIds } } });
       await tx.attendanceSignature.deleteMany({ where: { scheduleSlotId: { in: existingSlotIds } } });
       await tx.scheduleSlot.deleteMany({ where: { id: { in: existingSlotIds } } });
+
+      const scheduleData = scheduleGroupList.flatMap((group) =>
+        Array.from(group.courseIds).map((courseId) => ({
+          classId: group.classId,
+          day: group.day,
+          hour: group.hour,
+          courseId
+        }))
+      );
+
       await tx.scheduleSlot.createMany({
-        data: uniqueCourseIds.map((courseId) => ({ classId, day, hour, courseId })),
+        data: scheduleData,
         skipDuplicates: true
       });
-      scheduleImported += uniqueCourseIds.length;
+      scheduleImported += scheduleData.length;
     }
     }, { maxWait: 15000, timeout: 60000 });
 
