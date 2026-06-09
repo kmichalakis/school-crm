@@ -13,10 +13,10 @@ import {
   Plus,
   Printer,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  Users
 } from "lucide-react";
 import { appTitle, SchoolBrand } from "@/app/school-brand";
-import { currentContext, demoClass, demoCourses, demoStudents } from "@/lib/demo-data";
 import { isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
 import { dateToWeekDay, formatDateInput, schoolHours, weekDays } from "@/lib/school-time";
 import type { AttendanceCourseEntry, AttendanceCourseOption, AttendanceSheetPayload, SaveAttendanceAction } from "@/lib/attendance-types";
@@ -61,46 +61,21 @@ function getSheetKey(classId: string, date: string, hour: number) {
   return `${classId}:${date}:${hour}`;
 }
 
-function createDefaultSheet(date: string, day: string, hour: number): AttendanceSheetPayload {
-  const defaultCourseOption = {
-    courseId: "demo-course",
-    isNoCourse: false,
-    name: currentContext.course,
-    teacherId: "demo-teacher",
-    teacherName: currentContext.teacher
-  };
-
+function createEmptySheet(date: string, day: string, hour: number): AttendanceSheetPayload {
   return {
     date,
     day,
     hour,
-    course: currentContext.course,
-    courses: demoCourses,
-    courseOptions: [defaultCourseOption],
-    courseEntries: [{ ...defaultCourseOption, position: 0, signedAt: null }],
-    teacherName: currentContext.teacher,
-    students: demoStudents,
+    course: "",
+    courses: [],
+    courseOptions: [],
+    courseEntries: [],
+    teacherName: "",
+    students: [],
     signedAt: null,
     savedAt: null,
     dirty: false
   };
-}
-
-function readStoredSheets() {
-  if (typeof window === "undefined") {
-    return {};
-  }
-
-  try {
-    const storedValue = window.localStorage.getItem(storageKey);
-    if (!storedValue) {
-      return {};
-    }
-
-    return JSON.parse(storedValue) as Record<string, AttendanceSheetPayload>;
-  } catch {
-    return {};
-  }
 }
 
 function writeStoredSheets(sheets: Record<string, AttendanceSheetPayload>) {
@@ -112,7 +87,7 @@ function fallbackCourseOptions(sheet: AttendanceSheetPayload): AttendanceCourseO
     return sheet.courseOptions;
   }
 
-  return (sheet.courses && sheet.courses.length > 0 ? sheet.courses : demoCourses).map((courseName, index) => ({
+  return (sheet.courses ?? []).map((courseName, index) => ({
     courseId: courseName === sheet.course ? "legacy-current-course" : `legacy-course-${index}`,
     isNoCourse: courseName === "ΚΕΝΟ",
     isSubstitution: courseName === "ΑΝΑΠΛΗΡΩΣΗ",
@@ -229,13 +204,11 @@ export function AttendanceBoard({
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedDay, setSelectedDay] = useState(initialDay);
   const [selectedHour, setSelectedHour] = useState(initialHour);
-  const [sheets, setSheets] = useState<Record<string, AttendanceSheetPayload>>(() => ({
-    [getSheetKey(initialClassId, initialDate, initialHour)]: createDefaultSheet(initialDate, initialDay, initialHour)
-  }));
+  const [sheets, setSheets] = useState<Record<string, AttendanceSheetPayload>>({});
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>("unknown");
   const [isSyncing, setIsSyncing] = useState(false);
-  const [message, setMessage] = useState("Δεν υπάρχουν μη αποθηκευμένες αλλαγές.");
+  const [message, setMessage] = useState("Φόρτωση απουσιολογίου από τη βάση δεδομένων...");
   const [messageTone, setMessageTone] = useState<MessageTone>("info");
   const [isSignatureDialogOpen, setIsSignatureDialogOpen] = useState(false);
   const [signatureAction, setSignatureAction] = useState<"sign" | "unlock">("sign");
@@ -255,18 +228,12 @@ export function AttendanceBoard({
   }, [initialClassId, initialDate, initialDay, initialHour]);
 
   useEffect(() => {
-    const storedSheets = readStoredSheets();
-    if (Object.keys(storedSheets).length > 0) {
-      setSheets(storedSheets);
-      showMessage("Φορτώθηκαν τα αποθηκευμένα πρόχειρα από τη συσκευή.");
-    }
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
 
     async function loadFromDatabase() {
       setIsSyncing(true);
+      setDatabaseStatus("unknown");
+      showMessage("Φόρτωση απουσιολογίου από τη βάση δεδομένων...");
       try {
         const payload = await fetchAttendanceSheet(selectedClassId, selectedDate, selectedDay, selectedHour);
         if (cancelled) {
@@ -289,7 +256,7 @@ export function AttendanceBoard({
         }
 
         setDatabaseStatus("fallback");
-        showMessage(error instanceof Error ? error.message : "Η βάση δεν είναι διαθέσιμη. Προσωρινά χρησιμοποιείται αποθήκευση στη συσκευή.", "error");
+        showMessage(error instanceof Error ? error.message : "Η βάση δεν είναι διαθέσιμη. Δεν εμφανίζονται προσωρινά δεδομένα.", "error");
       } finally {
         if (!cancelled) {
           setIsSyncing(false);
@@ -305,8 +272,14 @@ export function AttendanceBoard({
   }, [selectedClassId, selectedDate, selectedDay, selectedHour]);
 
   const selectedSheetKey = getSheetKey(selectedClassId, selectedDate, selectedHour);
-  const currentSheet = sheets[selectedSheetKey] ?? createDefaultSheet(selectedDate, selectedDay, selectedHour);
-  const currentClass = availableClasses.find((classRecord) => classRecord.id === selectedClassId) ?? availableClasses[0] ?? demoClass;
+  const isSheetLoaded = Boolean(sheets[selectedSheetKey]);
+  const currentSheet = sheets[selectedSheetKey] ?? createEmptySheet(selectedDate, selectedDay, selectedHour);
+  const currentClass = availableClasses.find((classRecord) => classRecord.id === selectedClassId) ?? availableClasses[0] ?? {
+    id: selectedClassId,
+    name: "Τμήμα",
+    grade: "",
+    schoolYear: ""
+  };
   const courseOptions = useMemo(() => fallbackCourseOptions(currentSheet), [currentSheet]);
   const currentCourseEntries = useMemo(() => normalizedCourseEntries(currentSheet), [currentSheet]);
 
@@ -321,12 +294,12 @@ export function AttendanceBoard({
   const hasAnySignature = signedCourseCount > 0;
   const isSigned = currentCourseEntries.length > 0 && signedCourseCount === currentCourseEntries.length;
   const signatureStatus = isSigned ? "Υπογεγραμμένο" : hasAnySignature ? `Μερική (${signedCourseCount}/${currentCourseEntries.length})` : "Ανοιχτό";
-  const canEdit = !isSigned || isTeacher;
+  const canEdit = isSheetLoaded && (!isSigned || isTeacher);
   const isFutureAttendanceDate = selectedDate > formatDateInput(new Date());
   const hasUnsignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && !entry.signedAt);
   const hasSignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && entry.signedAt);
-  const canSign = (isClassTablet || hasUnsignedCourseForCurrentTeacher) && !isSigned && !isSyncing && !isFutureAttendanceDate;
-  const canUnlock = (isClassTablet || hasSignedCourseForCurrentTeacher) && isSigned && !isSyncing;
+  const canSign = isSheetLoaded && (isClassTablet || hasUnsignedCourseForCurrentTeacher) && !isSigned && !isSyncing && !isFutureAttendanceDate;
+  const canUnlock = isSheetLoaded && (isClassTablet || hasSignedCourseForCurrentTeacher) && isSigned && !isSyncing;
   const signedAtDate = currentSheet.signedAt ? new Date(currentSheet.signedAt) : null;
   const savedAtDate = currentSheet.savedAt ? new Date(currentSheet.savedAt) : null;
   const selectedDateAllowed = isAllowedSchoolDate(selectedDate, schoolYearBounds, calendarExceptions);
@@ -338,8 +311,13 @@ export function AttendanceBoard({
     : [];
 
   function updateCurrentSheet(updater: (sheet: AttendanceSheetPayload) => AttendanceSheetPayload) {
+    if (!isSheetLoaded) {
+      showMessage("Το απουσιολόγιο δεν έχει φορτωθεί από τη βάση.", "error");
+      return;
+    }
+
     setSheets((currentSheets) => {
-      const activeSheet = currentSheets[selectedSheetKey] ?? createDefaultSheet(selectedDate, selectedDay, selectedHour);
+      const activeSheet = currentSheets[selectedSheetKey] ?? createEmptySheet(selectedDate, selectedDay, selectedHour);
       return {
         ...currentSheets,
         [selectedSheetKey]: updater(activeSheet)
@@ -384,6 +362,11 @@ export function AttendanceBoard({
   }
 
   async function saveDraft() {
+    if (!isSheetLoaded) {
+      showMessage("Δεν υπάρχει φορτωμένο απουσιολόγιο για αποθήκευση.", "error");
+      return;
+    }
+
     const now = new Date();
     const optimisticSheet = sheetWithCourseEntries({
       ...currentSheet,
@@ -420,6 +403,11 @@ export function AttendanceBoard({
   }
 
   async function signAttendanceSheet(passwords?: Record<string, string>) {
+    if (!isSheetLoaded) {
+      showMessage("Δεν υπάρχει φορτωμένο απουσιολόγιο για υπογραφή.", "error");
+      return;
+    }
+
     if (!isTeacher && !isClassTablet) {
       showMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ξεκινήσει υπογραφή.", "error");
       return;
@@ -455,6 +443,11 @@ export function AttendanceBoard({
   }
 
   async function unlockAttendanceSheet(passwords?: Record<string, string>) {
+    if (!isSheetLoaded) {
+      showMessage("Δεν υπάρχει φορτωμένο απουσιολόγιο για ακύρωση υπογραφής.", "error");
+      return;
+    }
+
     if (!isTeacher && !isClassTablet) {
       showMessage("Μόνο εκπαιδευτικός ή τάμπλετ τάξης μπορεί να ακυρώσει υπογραφή.", "error");
       return;
@@ -620,7 +613,7 @@ export function AttendanceBoard({
       showMessage("Η ώρα επαναφορτώθηκε από τη βάση δεδομένων.", "success");
     } catch {
       setDatabaseStatus("fallback");
-      showMessage("Δεν έγινε επαναφορά, γιατί η βάση δεν απάντησε. Τα τρέχοντα δεδομένα έμειναν όπως ήταν.", "error");
+      showMessage("Δεν έγινε επαναφορά, γιατί η βάση δεν απάντησε. Δεν εμφανίζονται προσωρινά δεδομένα.", "error");
     } finally {
       setIsSyncing(false);
     }
@@ -659,6 +652,14 @@ export function AttendanceBoard({
             <ClipboardCheck size={18} />
             Εκκρεμότητες
           </Link>
+          <Link className="nav-button" href="/appointments">
+            <Users size={18} />
+            Ραντεβού
+          </Link>
+          <Link className="nav-button" href="/appointment-settings">
+            <CalendarClock size={18} />
+            Ώρες γονέων
+          </Link>
           <Link className="nav-button" href="/reports">
             <ClipboardCheck size={18} />
             Τμήματα
@@ -680,6 +681,10 @@ export function AttendanceBoard({
               <Link className="nav-button" href="/notifications">
                 <ShieldCheck size={18} />
                 Κανόνες ειδοποιήσεων
+              </Link>
+              <Link className="nav-button" href="/control">
+                <ShieldCheck size={18} />
+                Έλεγχος
               </Link>
               <Link className="nav-button" href="/schedule">
                 <CalendarClock size={18} />
@@ -714,7 +719,7 @@ export function AttendanceBoard({
             </div>
             <p>{isTeacher ? "Μπορεί να καταχωρίσει, να αποθηκεύσει και να υπογράψει." : "Μπορεί να καταχωρίσει απουσίες, αλλά όχι να υπογράψει."}</p>
             <span className={databaseStatus === "ready" ? "sync-pill ready" : "sync-pill"}>
-              {isSyncing ? "Συγχρονισμός..." : databaseStatus === "ready" ? "Βάση δεδομένων ενεργή" : databaseStatus === "fallback" ? "Τοπική αποθήκευση" : "Έλεγχος βάσης"}
+              {isSyncing ? "Συγχρονισμός..." : databaseStatus === "ready" ? "Βάση δεδομένων ενεργή" : databaseStatus === "fallback" ? "Βάση μη διαθέσιμη" : "Έλεγχος βάσης"}
             </span>
             <span className="sync-pill ready">Χρήστης: {username}</span>
           </section>
@@ -769,7 +774,24 @@ export function AttendanceBoard({
             </section>
           ) : null}
 
-          {showClassSelection ? null : (
+          {showClassSelection ? null : !isSheetLoaded ? (
+            <section className="admin-section">
+              <div className="admin-section-title">
+                <h2>{isSyncing ? "Φόρτωση απουσιολογίου" : "Δεν υπάρχουν διαθέσιμα δεδομένα"}</h2>
+                <p>
+                  {isSyncing
+                    ? "Γίνεται επικοινωνία με τη βάση δεδομένων. Δεν εμφανίζονται προσωρινά ή δοκιμαστικά στοιχεία."
+                    : "Η βάση δεν επέστρεψε απουσιολόγιο για την επιλεγμένη ημέρα και ώρα."}
+                </p>
+              </div>
+              <div className={`status-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"} aria-live="polite">
+                <span className="status-message-main">
+                  {messageTone === "error" ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+                  {message}
+                </span>
+              </div>
+            </section>
+          ) : (
           <>
           <div className="summary-grid">
             <div className="panel metric">

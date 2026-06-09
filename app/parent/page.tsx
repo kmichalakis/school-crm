@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AbsenceStatus, type WeekDay } from "@prisma/client";
-import { CalendarClock, ClipboardCheck, ShieldCheck } from "lucide-react";
+import { AbsenceStatus, AppointmentStatus, type WeekDay } from "@prisma/client";
+import { CalendarClock, ClipboardCheck, ShieldCheck, Users } from "lucide-react";
 import { LogoutButton } from "@/app/logout-button";
+import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
+import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
+import { ParentCancelAppointmentForm } from "@/app/parent/parent-cancel-appointment-form";
 import { ParentScheduleDatePicker } from "@/app/parent/parent-schedule-date-picker";
 import { SchoolBrand } from "@/app/school-brand";
+import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting } from "@/lib/appointments";
 import { dateInputValue, isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
@@ -15,12 +19,15 @@ import { dateToWeekDay, formatDateInput, schoolHours } from "@/lib/school-time";
 type ParentPageProps = {
   searchParams: Promise<{
     date?: string;
+    history?: string;
     studentId?: string;
     view?: string;
+    notice?: string;
+    noticeType?: string;
   }>;
 };
 
-type ParentView = "absences" | "schedule";
+type ParentView = "absences" | "schedule" | "appointments";
 
 function dateOnly(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
@@ -110,7 +117,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   }
 
   const params = await searchParams;
-  const view: ParentView = params.view === "schedule" ? "schedule" : "absences";
+  const view: ParentView = params.view === "schedule" ? "schedule" : params.view === "appointments" ? "appointments" : "absences";
+  const notice = params.notice ?? "";
+  const noticeType = params.noticeType === "error" ? "error" : "success";
+  const showAppointmentHistory = params.history === "appointments";
   const parent = await prisma.parent.findUnique({
     where: { userId: session.userId },
     include: {
@@ -151,8 +161,11 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   const selectedDay = dateToWeekDay(selectedDate) as WeekDay | null;
   const selectedDateIsWorking = selectedDay ? isAllowedSchoolDate(selectedDate, schoolYearBounds, calendarExceptions) : false;
   const studentIds = parent.students.map((student) => student.id);
+  const isAbsencesView = view === "absences";
+  const isScheduleView = view === "schedule";
+  const isAppointmentsView = view === "appointments";
   const absences =
-    studentIds.length > 0
+    isAbsencesView && studentIds.length > 0
       ? await prisma.attendanceSheetAbsence.findMany({
           where: {
             studentId: { in: studentIds },
@@ -160,18 +173,8 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
             status: { not: AbsenceStatus.REMOVED }
           },
           include: {
-            student: {
-              include: {
-                class: {
-                  include: { schoolYear: true }
-                }
-              }
-            },
             sheet: {
               include: {
-                class: {
-                  include: { schoolYear: true }
-                },
                 course: true
               }
             }
@@ -181,7 +184,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
       : [];
 
   const scheduleSlots =
-    selectedClass && selectedDay && selectedDateIsWorking
+    isScheduleView && selectedClass && selectedDay && selectedDateIsWorking
       ? await prisma.scheduleSlot.findMany({
           where: {
             classId: selectedClass.id,
@@ -200,7 +203,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
         })
       : [];
   const dailySheets =
-    selectedClass && selectedDateIsWorking
+    isScheduleView && selectedClass && selectedDateIsWorking
       ? await prisma.attendanceSheet.findMany({
           where: {
             classId: selectedClass.id,
@@ -246,6 +249,85 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
       ];
     })
   );
+  const [appointmentSetting, blockedAppointmentDay, parentAppointments, appointmentOfficeHours, appointmentUnavailableDays, appointmentCounts] =
+    isAppointmentsView
+      ? await Promise.all([
+          getAppointmentSetting(),
+          prisma.appointmentBlockedDay.findUnique({
+            where: { date: appointmentDate(selectedDate) }
+          }),
+          prisma.parentTeacherAppointment.findMany({
+            where: { parentId: parent.id },
+            include: {
+              student: {
+                include: { class: true }
+              },
+              teacher: true
+            },
+            orderBy: [{ date: "desc" }, { hour: "asc" }, { teacher: { surname: "asc" } }]
+          }),
+          selectedDay && selectedDateIsWorking
+            ? prisma.teacherOfficeHour.findMany({
+                where: { day: selectedDay },
+                include: { teacher: true },
+                orderBy: [{ hour: "asc" }, { teacher: { surname: "asc" } }, { teacher: { name: "asc" } }]
+              })
+            : Promise.resolve([]),
+          selectedDay && selectedDateIsWorking
+            ? prisma.teacherUnavailableDay.findMany({
+                where: { date: appointmentDate(selectedDate) }
+              })
+            : Promise.resolve([]),
+          selectedDay && selectedDateIsWorking
+            ? prisma.parentTeacherAppointment.groupBy({
+                by: ["teacherId", "hour"],
+                where: {
+                  date: appointmentDate(selectedDate),
+                  status: AppointmentStatus.BOOKED
+                },
+                _count: { _all: true }
+              })
+            : Promise.resolve([])
+        ])
+      : [{ maxPerTeacherSlot: 1 }, null, [], [], [], []];
+  const unavailableTeacherIds = new Set(appointmentUnavailableDays.map((day) => day.teacherId));
+  const bookedCountBySlot = new Map(appointmentCounts.map((entry) => [`${entry.teacherId}:${entry.hour}`, entry._count._all]));
+  const parentActiveAppointmentKeys = new Set(
+    parentAppointments
+      .filter((appointment) => appointment.status === AppointmentStatus.BOOKED && dateInputValue(appointment.date) === selectedDate)
+      .map((appointment) => `${appointment.teacherId}:${appointment.hour}`)
+  );
+  const parentActiveAppointmentTeacherIds = new Set(
+    parentAppointments
+      .filter((appointment) => appointment.status === AppointmentStatus.BOOKED && dateInputValue(appointment.date) === selectedDate)
+      .map((appointment) => appointment.teacherId)
+  );
+  const today = dateInputValue(new Date());
+  const futureParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) >= today);
+  const pastParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) < today);
+
+  function renderParentAppointment(appointment: (typeof parentAppointments)[number], canCancel: boolean) {
+    const dateValue = dateInputValue(appointment.date);
+    const isCancelled = appointment.status !== AppointmentStatus.BOOKED;
+    return (
+      <article className={isCancelled ? "appointment-row cancelled" : "appointment-row"} key={appointment.id}>
+        <div>
+          <strong>{appointmentDateLabel(dateValue, appointment.day)}</strong>
+          <span>
+            {hourLabel(appointment.hour)} · {appointment.teacher.surname} {appointment.teacher.name}
+          </span>
+          <span>
+            {appointment.student.surname} {appointment.student.name} · {appointment.student.class.name}
+          </span>
+          {appointment.cancellationReason ? <span>{appointment.cancellationReason}</span> : null}
+        </div>
+        <span className={isCancelled ? "sync-pill" : "sync-pill ready"}>{appointmentStatusLabel(appointment.status)}</span>
+        {canCancel && !isCancelled ? (
+          <ParentCancelAppointmentForm appointmentId={appointment.id} date={selectedDate} studentId={selectedStudent?.id ?? ""} />
+        ) : null}
+      </article>
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -271,9 +353,24 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
             <CalendarClock size={18} />
             Πρόγραμμα
           </Link>
+          <Link
+            className={view === "appointments" ? "nav-button active" : "nav-button"}
+            href={`/parent?view=appointments${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}&date=${selectedDate}`}
+          >
+            <Users size={18} />
+            Ραντεβού
+          </Link>
         </nav>
 
         <section className="main-grid">
+          {notice ? (
+            <div className={noticeType === "error" ? "status-message error" : "status-message success"}>
+              <span className="status-message-main">
+                <strong>{noticeType === "error" ? "Σφάλμα" : "Ενημέρωση"}</strong>
+                {notice}
+              </span>
+            </div>
+          ) : null}
           {view === "absences" ? (
             <>
               <section className="admin-section">
@@ -372,7 +469,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                 );
               })}
             </>
-          ) : (
+          ) : view === "schedule" ? (
             <section className="admin-section">
               <div className="admin-section-title">
                 <h2>Πρόγραμμα</h2>
@@ -449,6 +546,119 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                 </div>
               )}
             </section>
+          ) : (
+            <>
+              <section className="admin-section">
+                <div className="admin-section-title">
+                  <h2>Κλείσιμο ραντεβού</h2>
+                  <p>Επιλέξτε μαθητή, ημερομηνία και έναν ή περισσότερους διαθέσιμους εκπαιδευτικούς.</p>
+                </div>
+
+                <div className="parent-schedule-controls">
+                  <div className="class-tabs">
+                    {parent.students.map((student) => (
+                      <Link
+                        className={selectedStudent?.id === student.id ? "class-tab active" : "class-tab"}
+                        href={`/parent?view=appointments&studentId=${student.id}&date=${selectedDate}`}
+                        key={student.id}
+                      >
+                        {student.surname} {student.name}
+                        <span>{student.class.name}</span>
+                      </Link>
+                    ))}
+                  </div>
+                  {selectedClass && schoolYearBounds ? (
+                    <ParentAppointmentDatePicker
+                      date={selectedDate}
+                      maxDate={schoolYearBounds.endsOn}
+                      minDate={schoolYearBounds.startsOn}
+                      studentId={selectedStudent?.id ?? ""}
+                    />
+                  ) : null}
+                </div>
+
+                <div className="parent-schedule-heading">
+                  <strong>{appointmentDateLabel(selectedDate, selectedDay)}</strong>
+                  <span>
+                    {!selectedDateIsWorking
+                      ? "Αργία"
+                      : blockedAppointmentDay
+                        ? `Ακυρωμένη ημέρα${blockedAppointmentDay.reason ? ` · ${blockedAppointmentDay.reason}` : ""}`
+                        : "Διαθέσιμη ημερομηνία"}
+                  </span>
+                </div>
+
+                {!selectedStudent ? (
+                  <div className="empty-state">Δεν υπάρχουν συνδεδεμένοι μαθητές.</div>
+                ) : !selectedDateIsWorking ? (
+                  <div className="empty-state">Η επιλεγμένη ημερομηνία είναι αργία ή εκτός σχολικού έτους.</div>
+                ) : blockedAppointmentDay ? (
+                  <div className="empty-state">Η ημέρα ραντεβού έχει ακυρωθεί από το σχολείο.</div>
+                ) : appointmentOfficeHours.length === 0 ? (
+                  <div className="empty-state">Δεν υπάρχουν διαθέσιμοι εκπαιδευτικοί για αυτή την ημέρα.</div>
+                ) : (
+                  <ParentAppointmentBookingForm
+                    date={selectedDate}
+                    studentId={selectedStudent.id}
+                    slots={appointmentOfficeHours.map((officeHour) => {
+                        const key = `${officeHour.teacherId}:${officeHour.hour}`;
+                        const bookedCount = bookedCountBySlot.get(key) ?? 0;
+                        const unavailable = unavailableTeacherIds.has(officeHour.teacherId);
+                        const full = bookedCount >= appointmentSetting.maxPerTeacherSlot;
+                        const alreadyBooked = parentActiveAppointmentTeacherIds.has(officeHour.teacherId) || parentActiveAppointmentKeys.has(key);
+                        return {
+                          key,
+                          teacherId: officeHour.teacherId,
+                          teacherName: `${officeHour.teacher.surname} ${officeHour.teacher.name}`,
+                          hourLabel: hourLabel(officeHour.hour),
+                          disabledReason: unavailable
+                            ? "Μη διαθέσιμος/η"
+                            : full
+                              ? "Πλήρης ώρα"
+                              : alreadyBooked
+                                ? "Έχετε ήδη ραντεβού με αυτόν/ήν τον/την εκπαιδευτικό."
+                                : null
+                        };
+                      })}
+                  />
+                )}
+              </section>
+
+              <section className="admin-section">
+                <div className="admin-section-title">
+                  <h2>Τα ραντεβού μου</h2>
+                  <p>Εμφανίζονται τα σημερινά και μελλοντικά ραντεβού. Το ιστορικό ανοίγει ξεχωριστά.</p>
+                </div>
+                <div className="appointment-list">
+                  {futureParentAppointments.length > 0 ? (
+                    futureParentAppointments.map((appointment) => renderParentAppointment(appointment, true))
+                  ) : (
+                    <div className="empty-state">Δεν έχετε σημερινά ή μελλοντικά ραντεβού.</div>
+                  )}
+                </div>
+                <div className="section-actions">
+                  <Link
+                    className="secondary-button"
+                    href={
+                      showAppointmentHistory
+                        ? `/parent?view=appointments${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}&date=${selectedDate}`
+                        : `/parent?view=appointments${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}&date=${selectedDate}&history=appointments`
+                    }
+                  >
+                    {showAppointmentHistory ? "Απόκρυψη ιστορικού" : "Ιστορικό"}
+                  </Link>
+                </div>
+                {showAppointmentHistory ? (
+                  <div className="appointment-list">
+                    {pastParentAppointments.length > 0 ? (
+                      pastParentAppointments.map((appointment) => renderParentAppointment(appointment, false))
+                    ) : (
+                      <div className="empty-state">Δεν υπάρχει παλιό ιστορικό ραντεβού.</div>
+                    )}
+                  </div>
+                ) : null}
+              </section>
+            </>
           )}
         </section>
       </div>

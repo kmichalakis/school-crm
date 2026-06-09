@@ -29,6 +29,28 @@ async function main() {
   });
 
   console.log(`Admin user is ready: ${username}`);
+
+  const schoolUsername = (process.env.SCHOOL_OFFICE_USERNAME ?? "school").trim().toLowerCase();
+  const schoolPassword = (process.env.SCHOOL_OFFICE_PASSWORD ?? "school").trim();
+
+  await prisma.user.upsert({
+    where: { username: schoolUsername },
+    update: {
+      passwordHash: hashPassword(schoolPassword),
+      role: UserRole.SCHOOL_OFFICE,
+      mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: null
+    },
+    create: {
+      username: schoolUsername,
+      passwordHash: hashPassword(schoolPassword),
+      role: UserRole.SCHOOL_OFFICE,
+      mustChangePassword: false
+    }
+  });
+
+  console.log(`School office user is ready: ${schoolUsername}`);
 }
 
 main()

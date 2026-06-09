@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock, ClipboardCheck, MailCheck, Printer, ShieldCheck } from "lucide-react";
+import { CalendarClock, ClipboardCheck, MailCheck, Printer, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import type { UserRole } from "@prisma/client";
 import { LogoutButton } from "@/app/logout-button";
@@ -17,6 +17,8 @@ type AppNavigationProps = {
     | "dashboard"
     | "notifications"
     | "control"
+    | "appointments"
+    | "appointment-settings"
     | "admin";
   children: ReactNode;
   role: UserRole;
@@ -27,6 +29,7 @@ type AppNavigationProps = {
 
 export function AppNavigation({ active, children, role, title, subtitle, userLabel }: AppNavigationProps) {
   const isAdmin = role === "ADMIN";
+  const isSchoolOffice = role === "SCHOOL_OFFICE";
 
   return (
     <main className="app-shell">
@@ -41,26 +44,43 @@ export function AppNavigation({ active, children, role, title, subtitle, userLab
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Κύρια πλοήγηση">
-          <Link className={active === "attendance" ? "nav-button active" : "nav-button"} href="/">
-            <ClipboardCheck size={18} />
-            Απουσιολόγιο
-          </Link>
-          <Link className={active === "teacher" ? "nav-button active" : "nav-button"} href="/teacher">
-            <CalendarClock size={18} />
-            Μαθήματα
-          </Link>
-          <Link className={active === "pending" ? "nav-button active" : "nav-button"} href="/pending">
-            <ClipboardCheck size={18} />
-            Εκκρεμότητες
-          </Link>
-          <Link className={active === "reports" ? "nav-button active" : "nav-button"} href="/reports">
-            <ClipboardCheck size={18} />
-            Τμήματα
-          </Link>
-          <Link className={active === "print" ? "nav-button active" : "nav-button"} href="/print">
-            <Printer size={18} />
-            Εκτυπώσεις
-          </Link>
+          {!isSchoolOffice ? (
+            <>
+              <Link className={active === "attendance" ? "nav-button active" : "nav-button"} href="/">
+                <ClipboardCheck size={18} />
+                Απουσιολόγιο
+              </Link>
+              <Link className={active === "teacher" ? "nav-button active" : "nav-button"} href="/teacher">
+                <CalendarClock size={18} />
+                Μαθήματα
+              </Link>
+              <Link className={active === "pending" ? "nav-button active" : "nav-button"} href="/pending">
+                <ClipboardCheck size={18} />
+                Εκκρεμότητες
+              </Link>
+              <Link className={active === "appointments" ? "nav-button active" : "nav-button"} href="/appointments">
+                <Users size={18} />
+                Ραντεβού
+              </Link>
+              <Link className={active === "appointment-settings" ? "nav-button active" : "nav-button"} href="/appointment-settings">
+                <CalendarClock size={18} />
+                Ώρες γονέων
+              </Link>
+              <Link className={active === "reports" ? "nav-button active" : "nav-button"} href="/reports">
+                <ClipboardCheck size={18} />
+                Τμήματα
+              </Link>
+              <Link className={active === "print" ? "nav-button active" : "nav-button"} href="/print">
+                <Printer size={18} />
+                Εκτυπώσεις
+              </Link>
+            </>
+          ) : (
+            <Link className={active === "appointments" ? "nav-button active" : "nav-button"} href="/appointments">
+              <Users size={18} />
+              Ραντεβού
+            </Link>
+          )}
           {isAdmin ? (
             <>
               <Link className={active === "dashboard" ? "nav-button active" : "nav-button"} href="/dashboard">

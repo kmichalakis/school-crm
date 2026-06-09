@@ -169,6 +169,10 @@ export default async function Home({ searchParams }: HomeProps) {
     redirect("/parent");
   }
 
+  if (user.role === "SCHOOL_OFFICE") {
+    redirect("/appointments");
+  }
+
   const isClassTablet = user.role === "CLASS_TABLET";
   const activeYear = await prisma.schoolYear.findFirst({
     where: { status: "ACTIVE" },

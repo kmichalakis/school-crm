@@ -23,6 +23,7 @@ enum UserRole {
   TEACHER
   ADMIN
   PARENT
+  SCHOOL_OFFICE
 }
 
 enum WeekDay {
@@ -56,6 +57,12 @@ enum ParentJustificationStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CANCELLED_BY_PARENT
+  CANCELLED_BY_ADMIN
 }
 
 model SchoolYear {
@@ -129,6 +136,7 @@ model Parent {
   students              Student[]
   notifications         ParentNotification[]
   justificationRequests ParentJustificationRequest[]
+  appointments          ParentTeacherAppointment[]
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
 }
@@ -147,6 +155,9 @@ model Teacher {
   courses                CourseTeacher[]
   attendanceSheetCourses AttendanceSheetCourse[]
   signatures             AttendanceSignature[]
+  officeHours            TeacherOfficeHour[]
+  unavailableDays        TeacherUnavailableDay[]
+  appointments           ParentTeacherAppointment[]
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
 }
@@ -167,6 +178,7 @@ model Student {
   sheetAbsences         AttendanceSheetAbsence[]
   notifications         ParentNotification[]
   justificationRequests ParentJustificationRequest[]
+  appointments          ParentTeacherAppointment[]
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
 
@@ -304,6 +316,7 @@ model AttendanceSheetAbsence {
   student       Student         @relation(fields: [studentId], references: [id])
 
   @@id([sheetId, studentId])
+  @@index([studentId, absent, status])
   @@index([studentId, updatedAt])
 }
 
@@ -365,4 +378,71 @@ model ParentJustificationRequest {
   @@unique([parentId, studentId, sheetId])
   @@index([status, createdAt])
   @@index([studentId, createdAt])
+}
+
+model AppointmentSetting {
+  id                String   @id @default(cuid())
+  maxPerTeacherSlot Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model TeacherOfficeHour {
+  id        String   @id @default(cuid())
+  teacherId String
+  day       WeekDay
+  hour      Int
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teacherId, day, hour])
+  @@index([day, hour])
+}
+
+model TeacherUnavailableDay {
+  id        String   @id @default(cuid())
+  teacherId String
+  date      DateTime @db.Date
+  reason    String?
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teacherId, date])
+  @@index([date])
+}
+
+model AppointmentBlockedDay {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date])
+}
+
+model ParentTeacherAppointment {
+  id                 String            @id @default(cuid())
+  parentId           String
+  studentId          String
+  teacherId          String
+  date               DateTime          @db.Date
+  day                WeekDay
+  hour               Int
+  status             AppointmentStatus @default(BOOKED)
+  cancellationReason String?
+  cancelledAt        DateTime?
+  notifiedAt         DateTime?
+  parent             Parent            @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student            Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacher            Teacher           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@unique([parentId, studentId, teacherId, date, hour])
+  @@index([teacherId, date, hour, status])
+  @@index([parentId, date, status])
+  @@index([date, status])
 }
