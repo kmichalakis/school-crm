@@ -6,12 +6,10 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
-  ClipboardCheck,
   History,
   LockKeyhole,
   Minus,
   Plus,
-  Printer,
   Save,
   ShieldCheck,
   Users
@@ -640,51 +638,15 @@ export function AttendanceBoard({
       <div className={isClassTablet ? "workspace tablet-workspace" : "workspace"}>
         {isClassTablet ? null : (
         <nav className="sidebar" aria-label="Κύρια πλοήγηση">
-          <Link className="nav-button active" href="/">
-            <ClipboardCheck size={18} />
-            Απουσιολόγιο
-          </Link>
-          <Link className="nav-button" href="/teacher">
-            <CalendarClock size={18} />
-            Μαθήματα
-          </Link>
-          <Link className="nav-button" href="/pending">
-            <ClipboardCheck size={18} />
-            Εκκρεμότητες
-          </Link>
           <Link className="nav-button" href="/appointments">
             <Users size={18} />
             Ραντεβού
           </Link>
-          <Link className="nav-button" href="/appointment-settings">
-            <CalendarClock size={18} />
-            Ώρες γονέων
-          </Link>
-          <Link className="nav-button" href="/reports">
-            <ClipboardCheck size={18} />
-            Τμήματα
-          </Link>
-          <Link className="nav-button" href="/print">
-            <Printer size={18} />
-            Εκτυπώσεις
-          </Link>
           {isAdmin ? (
             <>
-              <Link className="nav-button" href="/dashboard">
-                <ClipboardCheck size={18} />
-                Dashboard
-              </Link>
-              <Link className="nav-button" href="/api/reports/export">
-                <Printer size={18} />
-                Εξαγωγές
-              </Link>
-              <Link className="nav-button" href="/notifications">
-                <ShieldCheck size={18} />
-                Κανόνες ειδοποιήσεων
-              </Link>
-              <Link className="nav-button" href="/control">
-                <ShieldCheck size={18} />
-                Έλεγχος
+              <Link className="nav-button" href="/appointment-settings">
+                <CalendarClock size={18} />
+                Ώρες γονέων
               </Link>
               <Link className="nav-button" href="/schedule">
                 <CalendarClock size={18} />

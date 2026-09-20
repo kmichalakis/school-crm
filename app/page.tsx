@@ -173,7 +173,18 @@ export default async function Home({ searchParams }: HomeProps) {
     redirect("/appointments");
   }
 
-  const isClassTablet = user.role === "CLASS_TABLET";
+  if (user.role === "ADMIN") {
+    redirect("/appointments");
+  }
+
+  if (user.role === "TEACHER") {
+    redirect("/appointments");
+  }
+
+  if (user.role !== "CLASS_TABLET") {
+    redirect("/appointments");
+  }
+
   const activeYear = await prisma.schoolYear.findFirst({
     where: { status: "ACTIVE" },
     include: { calendarDays: true },
@@ -191,68 +202,26 @@ export default async function Home({ searchParams }: HomeProps) {
         isWorkingDay: calendarDay.isWorkingDay
       }))
     : [];
-  const adminClasses =
-    user.role === "ADMIN"
-      ? await prisma.class.findMany({
-          include: { schoolYear: true },
-          orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
-        })
-      : [];
-  const teacherClasses =
-    user.role === "TEACHER" && user.teacher
-      ? await prisma.class.findMany({
-          where: {
-            OR: [
-              { responsibleTeacherId: user.teacher.id },
-              { teachers: { some: { id: user.teacher.id } } },
-              { courses: { some: { teachers: { some: { teacherId: user.teacher.id } } } } }
-            ]
-          },
-          include: { schoolYear: true },
-          orderBy: [{ schoolYear: { startsOn: "desc" } }, { name: "asc" }]
-        })
-      : [];
-  if (user.role === "ADMIN" && adminClasses.length === 0) {
-    redirect("/admin");
-  }
-
-  const availableClasses =
-    adminClasses.length > 0
-      ? adminClasses.map((classRecord) => ({
-          id: classRecord.id,
-          name: classRecord.name,
-          grade: classRecord.year === "B" ? "Β" : classRecord.year === "C" ? "Γ" : "Α",
-          schoolYear: classRecord.schoolYear.name,
+  const availableClasses = user.class
+    ? [
+        {
+          id: user.class.id,
+          name: user.class.name,
+          grade: user.class.year === "B" ? "Β" : user.class.year === "C" ? "Γ" : "Α",
+          schoolYear: user.class.schoolYear.name,
           isResponsible: false
-        }))
-      : teacherClasses.length > 0
-        ? teacherClasses.map((classRecord) => ({
-            id: classRecord.id,
-            name: classRecord.name,
-            grade: classRecord.year === "B" ? "Β" : classRecord.year === "C" ? "Γ" : "Α",
-            schoolYear: classRecord.schoolYear.name,
-            isResponsible: classRecord.responsibleTeacherId === user.teacher?.id
-          }))
-      : user.class
-        ? [
-            {
-              id: user.class.id,
-              name: user.class.name,
-              grade: user.class.year === "B" ? "Β" : user.class.year === "C" ? "Γ" : "Α",
-              schoolYear: user.class.schoolYear.name,
-              isResponsible: false
-            }
-          ]
-        : [
-            {
-              id: "class-a1",
-              name: "Α1",
-              grade: "Α",
-              schoolYear: "2025-2026",
-              isResponsible: false
-            }
-          ];
-  const userLabel = user.teacher ? `${user.teacher.name} ${user.teacher.surname}` : user.class ? `Τάξη ${user.class.name}` : user.username;
+        }
+      ]
+    : [
+        {
+          id: "class-a1",
+          name: "Α1",
+          grade: "Α",
+          schoolYear: "2025-2026",
+          isResponsible: false
+        }
+      ];
+  const userLabel = user.class ? `Τάξη ${user.class.name}` : user.username;
   const requestedClass = availableClasses.find((classRecord) => classRecord.id === params.classId);
   const initialClassId = requestedClass?.id ?? user.classId ?? availableClasses[0]?.id ?? "class-a1";
   const selectedDate = validInitialDate(params.date, schoolYearBounds, calendarExceptions);
@@ -260,7 +229,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
   return (
     <AttendanceBoard
-      initialMode={isClassTablet ? "tablet" : "teacher"}
+      initialMode="tablet"
       userLabel={userLabel}
       initialClassId={initialClassId}
       initialDate={selectedDate}
@@ -268,9 +237,9 @@ export default async function Home({ searchParams }: HomeProps) {
       initialHour={validInitialHour(params.hour)}
       availableClasses={availableClasses}
       username={user.username}
-      isAdmin={user.role === "ADMIN"}
-      currentTeacherId={user.teacher?.id ?? null}
-      showClassSelection={user.role === "TEACHER" && !params.classId}
+      isAdmin={false}
+      currentTeacherId={null}
+      showClassSelection={false}
       schoolYearBounds={schoolYearBounds}
       calendarExceptions={calendarExceptions}
     />

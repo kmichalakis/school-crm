@@ -15,6 +15,7 @@ import { dateToWeekDay } from "@/lib/school-time";
 type AppointmentsPageProps = {
   searchParams: Promise<{
     date?: string;
+    tab?: string;
     teacherId?: string;
     notice?: string;
     noticeType?: string;
@@ -33,6 +34,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
 
   const params = await searchParams;
   const selectedDate = validAppointmentDate(params.date, nextWeekdayDate());
+  const activeAdminTab = params.tab === "dashboard" ? "dashboard" : "appointments";
   const notice = params.notice ?? "";
   const noticeType = params.noticeType === "error" ? "error" : "success";
   const user = await prisma.user.findUnique({
@@ -43,6 +45,8 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const userLabel = currentTeacher ? `${currentTeacher.name} ${currentTeacher.surname}` : user?.username ?? "Χρήστης";
   const isAdmin = session.role === "ADMIN";
   const isSchoolOffice = session.role === "SCHOOL_OFFICE";
+  const isTeacherOverviewAccount = isSchoolOffice && user?.username === "teachers";
+  const usesAdminAppointmentView = isAdmin || isTeacherOverviewAccount;
   const canSelectTeacher = isAdmin || isSchoolOffice;
   const teachers = canSelectTeacher
     ? await prisma.teacher.findMany({ orderBy: [{ surname: "asc" }, { name: "asc" }] })
@@ -82,7 +86,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   }
 
   const [appointmentSetting, dashboardOfficeHours, dashboardCounts, dashboardUnavailableDays, dashboardBlockedDay] =
-    isAdmin && !showAllDaysForTeacher && selectedDay
+    usesAdminAppointmentView && !showAllDaysForTeacher && selectedDay
       ? await Promise.all([
           getAppointmentSetting(),
           prisma.teacherOfficeHour.findMany({
@@ -136,7 +140,19 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const fullSlots = dashboardStats.reduce((sum, stat) => sum + stat.fullSlots, 0);
   const availableSlots = Math.max(0, totalCapacity - totalBooked);
   const fullnessPercent = totalCapacity > 0 ? Math.round((totalBooked / totalCapacity) * 100) : 0;
-  const title = isSchoolOffice ? "Ραντεβού σχολείου" : "Ραντεβού";
+  const title = isTeacherOverviewAccount ? "Ραντεβού εκπαιδευτικών" : isSchoolOffice ? "Ραντεβού σχολείου" : "Ραντεβού";
+
+  function adminTabHref(tab: "appointments" | "dashboard") {
+    const tabParams = new URLSearchParams();
+    if (tab === "dashboard") {
+      tabParams.set("tab", "dashboard");
+    }
+    tabParams.set("date", selectedDate);
+    if (selectedTeacherId) {
+      tabParams.set("teacherId", selectedTeacherId);
+    }
+    return `/appointments?${tabParams.toString()}`;
+  }
 
   function renderAppointment(appointment: AppointmentRow, allowAdminCancel: boolean) {
     const dateValue = dateInputValue(appointment.date);
@@ -191,103 +207,108 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
         </div>
       ) : null}
 
-      {isAdmin ? (
+      {usesAdminAppointmentView ? (
         <>
-          <section className="admin-section">
-            <div className="admin-section-title">
-              <h2>Dashboard πληρότητας</h2>
-              <p>
-                {dashboardBlockedDay
-                  ? `Η ημέρα έχει ακυρωθεί${dashboardBlockedDay.reason ? `: ${dashboardBlockedDay.reason}` : "."}`
-                  : `Πληρότητα για ${appointmentDateLabel(selectedDate, selectedDay)}.`}
-              </p>
-            </div>
-            <div className="appointment-dashboard-grid">
-              <article className="appointment-dashboard-card">
-                <span>Κρατήσεις</span>
-                <strong>{totalBooked}</strong>
-              </article>
-              <article className="appointment-dashboard-card">
-                <span>Διαθέσιμες θέσεις</span>
-                <strong>{availableSlots}</strong>
-              </article>
-              <article className="appointment-dashboard-card">
-                <span>Πληρότητα</span>
-                <strong>{fullnessPercent}%</strong>
-              </article>
-              <article className="appointment-dashboard-card">
-                <span>Πλήρεις ώρες</span>
-                <strong>{fullSlots}</strong>
-              </article>
-            </div>
-            <div className="appointment-fullness-list">
-              {dashboardStats.length > 0 ? (
-                dashboardStats.map((stat) => (
-                  <article className="appointment-fullness-row" key={stat.teacherId}>
-                    <div>
-                      <strong>{stat.teacherName}</strong>
-                      <span>{stat.hours.map(hourLabel).join(", ")}</span>
-                    </div>
-                    {stat.unavailable ? (
-                      <span className="sync-pill">Μη διαθέσιμος/η</span>
-                    ) : (
-                      <>
-                        <span>{stat.booked}/{stat.capacity}</span>
-                        <progress max={stat.capacity || 1} value={stat.booked} />
-                      </>
-                    )}
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">{selectedDay ? "Δεν έχουν οριστεί ώρες γονέων για αυτή την ημέρα." : "Η ημερομηνία δεν είναι εργάσιμη ημέρα."}</div>
-              )}
-            </div>
-          </section>
+          <nav className="admin-tabs" aria-label="Προβολές ραντεβού">
+            <Link className={activeAdminTab === "appointments" ? "admin-tab active" : "admin-tab"} href={adminTabHref("appointments")}>
+              Ραντεβού
+            </Link>
+            <Link className={activeAdminTab === "dashboard" ? "admin-tab active" : "admin-tab"} href={adminTabHref("dashboard")}>
+              Dashboard
+            </Link>
+          </nav>
 
-          <section className="admin-section">
-            <div className="admin-section-title">
-              <h2>Φίλτρα</h2>
-              <p>Επιλέξτε ημερομηνία για την ημερήσια εικόνα ή εκπαιδευτικό για όλα τα ραντεβού του.</p>
-            </div>
-            <form className="admin-form grid-form" method="get">
-              <label>
-                Ημερομηνία
-                <input name="date" type="date" defaultValue={selectedDate} />
-              </label>
-              <label>
-                Εκπαιδευτικός
-                <select name="teacherId" defaultValue={selectedTeacherId}>
-                  <option value="">Όλοι στην ημερομηνία</option>
-                  {teachers.map((teacher) => (
-                    <option key={teacher.id} value={teacher.id}>
-                      {teacher.surname} {teacher.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="primary-button" type="submit">
-                Προβολή
-              </button>
-            </form>
-            <div className="section-actions">
-              <Link className="secondary-button" href={`/print/appointments?${appointmentExportParams.toString()}`}>
-                Εκτύπωση / PDF
-              </Link>
-              <Link className="secondary-button" href={`/api/appointments/export?${appointmentExportParams.toString()}`}>
-                CSV εξαγωγή
-              </Link>
-            </div>
-          </section>
+          {activeAdminTab === "appointments" ? (
+            <>
+              <section className="admin-section">
+                <div className="admin-section-title">
+                  <h2>{showAllDaysForTeacher ? "Ραντεβού εκπαιδευτικού" : appointmentDateLabel(selectedDate, selectedDay)}</h2>
+                  <p>{appointments.length} εγγραφές</p>
+                </div>
+                <div className="appointment-list">
+                  {appointments.length > 0 ? appointments.map((appointment) => renderAppointment(appointment, isAdmin)) : <div className="empty-state">Δεν υπάρχουν ραντεβού με τα επιλεγμένα φίλτρα.</div>}
+                </div>
+              </section>
 
-          <section className="admin-section">
-            <div className="admin-section-title">
-              <h2>{showAllDaysForTeacher ? "Ραντεβού εκπαιδευτικού" : appointmentDateLabel(selectedDate, selectedDay)}</h2>
-              <p>{appointments.length} εγγραφές</p>
-            </div>
-            <div className="appointment-list">
-              {appointments.length > 0 ? appointments.map((appointment) => renderAppointment(appointment, true)) : <div className="empty-state">Δεν υπάρχουν ραντεβού με τα επιλεγμένα φίλτρα.</div>}
-            </div>
-          </section>
+              <section className="admin-section">
+                <div className="admin-section-title">
+                  <h2>Φίλτρα</h2>
+                  <p>Επιλέξτε ημερομηνία για την ημερήσια εικόνα ή εκπαιδευτικό για όλα τα ραντεβού του.</p>
+                </div>
+                <form className="admin-form grid-form" method="get">
+                  <label>
+                    Ημερομηνία
+                    <input name="date" type="date" defaultValue={selectedDate} />
+                  </label>
+                  <label>
+                    Εκπαιδευτικός
+                    <select name="teacherId" defaultValue={selectedTeacherId}>
+                      <option value="">Όλοι στην ημερομηνία</option>
+                      {teachers.map((teacher) => (
+                        <option key={teacher.id} value={teacher.id}>
+                          {teacher.surname} {teacher.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="primary-button" type="submit">
+                    Προβολή
+                  </button>
+                </form>
+              </section>
+            </>
+          ) : (
+            <section className="admin-section">
+              <div className="admin-section-title">
+                <h2>Dashboard πληρότητας</h2>
+                <p>
+                  {dashboardBlockedDay
+                    ? `Η ημέρα έχει ακυρωθεί${dashboardBlockedDay.reason ? `: ${dashboardBlockedDay.reason}` : "."}`
+                    : `Πληρότητα για ${appointmentDateLabel(selectedDate, selectedDay)}.`}
+                </p>
+              </div>
+              <div className="appointment-dashboard-grid">
+                <article className="appointment-dashboard-card">
+                  <span>Κρατήσεις</span>
+                  <strong>{totalBooked}</strong>
+                </article>
+                <article className="appointment-dashboard-card">
+                  <span>Διαθέσιμες θέσεις</span>
+                  <strong>{availableSlots}</strong>
+                </article>
+                <article className="appointment-dashboard-card">
+                  <span>Πληρότητα</span>
+                  <strong>{fullnessPercent}%</strong>
+                </article>
+                <article className="appointment-dashboard-card">
+                  <span>Πλήρεις ώρες</span>
+                  <strong>{fullSlots}</strong>
+                </article>
+              </div>
+              <div className="appointment-fullness-list">
+                {dashboardStats.length > 0 ? (
+                  dashboardStats.map((stat) => (
+                    <article className="appointment-fullness-row" key={stat.teacherId}>
+                      <div>
+                        <strong>{stat.teacherName}</strong>
+                        <span>{stat.hours.map(hourLabel).join(", ")}</span>
+                      </div>
+                      {stat.unavailable ? (
+                        <span className="sync-pill">Μη διαθέσιμος/η</span>
+                      ) : (
+                        <>
+                          <span>{stat.booked}/{stat.capacity}</span>
+                          <progress max={stat.capacity || 1} value={stat.booked} />
+                        </>
+                      )}
+                    </article>
+                  ))
+                ) : (
+                  <div className="empty-state">{selectedDay ? "Δεν έχουν οριστεί ώρες γονέων για αυτή την ημέρα." : "Η ημερομηνία δεν είναι εργάσιμη ημέρα."}</div>
+                )}
+              </div>
+            </section>
+          )}
         </>
       ) : isSchoolOffice ? (
         <>
@@ -372,14 +393,6 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
             <div className="admin-section-title">
               <h2>Σήμερα</h2>
               <p>{appointmentDateLabel(today)}</p>
-            </div>
-            <div className="section-actions">
-              <Link className="secondary-button" href="/print/appointments">
-                Εκτύπωση / PDF
-              </Link>
-              <Link className="secondary-button" href="/api/appointments/export">
-                CSV εξαγωγή
-              </Link>
             </div>
             <div className="appointment-list">
               {todayTeacherAppointments.length > 0 ? todayTeacherAppointments.map((appointment) => renderAppointment(appointment, false)) : <div className="empty-state">Δεν έχετε ραντεβού σήμερα.</div>}

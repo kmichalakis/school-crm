@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus, AppointmentStatus, type WeekDay } from "@prisma/client";
-import { CalendarClock, ClipboardCheck, ShieldCheck, Users } from "lucide-react";
+import { ShieldCheck, Users } from "lucide-react";
 import { LogoutButton } from "@/app/logout-button";
 import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
 import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
@@ -28,6 +28,10 @@ type ParentPageProps = {
 };
 
 type ParentView = "absences" | "schedule" | "appointments";
+
+function parentVisibleView(): ParentView {
+  return "appointments";
+}
 
 function dateOnly(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
@@ -117,7 +121,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   }
 
   const params = await searchParams;
-  const view: ParentView = params.view === "schedule" ? "schedule" : params.view === "appointments" ? "appointments" : "absences";
+  const view = parentVisibleView();
   const notice = params.notice ?? "";
   const noticeType = params.noticeType === "error" ? "error" : "success";
   const showAppointmentHistory = params.history === "appointments";
@@ -342,17 +346,6 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Πλοήγηση γονέα">
-          <Link className={view === "absences" ? "nav-button active" : "nav-button"} href="/parent?view=absences">
-            <ClipboardCheck size={18} />
-            Απουσίες
-          </Link>
-          <Link
-            className={view === "schedule" ? "nav-button active" : "nav-button"}
-            href={`/parent?view=schedule${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}&date=${selectedDate}`}
-          >
-            <CalendarClock size={18} />
-            Πρόγραμμα
-          </Link>
           <Link
             className={view === "appointments" ? "nav-button active" : "nav-button"}
             href={`/parent?view=appointments${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}&date=${selectedDate}`}

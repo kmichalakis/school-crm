@@ -3,8 +3,8 @@ type SchoolBrandProps = {
   title: string;
 };
 
-export const appTitle = "Mytilene Scholaris";
-export const schoolName = "1ο Πρότυπο Γυμνάσιο Μυτιλήνης";
+export const appTitle = "Πλατφόρμα ενημέρωσης γονέων";
+export const schoolName = '1ο Πρότυπο Γυμνάσιο Μυτιλήνης "Βύρων Σιβολαπένκο"';
 export const schoolLogoUrl = "https://1gym-mytil.les.sch.gr/wp-content/uploads/2025/12/cropped-cropped-brebas25.png";
 
 export function SchoolBrand({ subtitle, title }: SchoolBrandProps) {

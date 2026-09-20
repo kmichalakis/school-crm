@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock, ClipboardCheck, MailCheck, Printer, ShieldCheck, Users } from "lucide-react";
+import { CalendarClock, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import type { UserRole } from "@prisma/client";
 import { LogoutButton } from "@/app/logout-button";
@@ -30,6 +30,7 @@ type AppNavigationProps = {
 export function AppNavigation({ active, children, role, title, subtitle, userLabel }: AppNavigationProps) {
   const isAdmin = role === "ADMIN";
   const isSchoolOffice = role === "SCHOOL_OFFICE";
+  const canManageAppointmentSettings = role === "ADMIN";
 
   return (
     <main className="app-shell">
@@ -46,34 +47,16 @@ export function AppNavigation({ active, children, role, title, subtitle, userLab
         <nav className="sidebar" aria-label="Κύρια πλοήγηση">
           {!isSchoolOffice ? (
             <>
-              <Link className={active === "attendance" ? "nav-button active" : "nav-button"} href="/">
-                <ClipboardCheck size={18} />
-                Απουσιολόγιο
-              </Link>
-              <Link className={active === "teacher" ? "nav-button active" : "nav-button"} href="/teacher">
-                <CalendarClock size={18} />
-                Μαθήματα
-              </Link>
-              <Link className={active === "pending" ? "nav-button active" : "nav-button"} href="/pending">
-                <ClipboardCheck size={18} />
-                Εκκρεμότητες
-              </Link>
               <Link className={active === "appointments" ? "nav-button active" : "nav-button"} href="/appointments">
                 <Users size={18} />
                 Ραντεβού
               </Link>
-              <Link className={active === "appointment-settings" ? "nav-button active" : "nav-button"} href="/appointment-settings">
-                <CalendarClock size={18} />
-                Ώρες γονέων
-              </Link>
-              <Link className={active === "reports" ? "nav-button active" : "nav-button"} href="/reports">
-                <ClipboardCheck size={18} />
-                Τμήματα
-              </Link>
-              <Link className={active === "print" ? "nav-button active" : "nav-button"} href="/print">
-                <Printer size={18} />
-                Εκτυπώσεις
-              </Link>
+              {canManageAppointmentSettings ? (
+                <Link className={active === "appointment-settings" ? "nav-button active" : "nav-button"} href="/appointment-settings">
+                  <CalendarClock size={18} />
+                  Ώρες γονέων
+                </Link>
+              ) : null}
             </>
           ) : (
             <Link className={active === "appointments" ? "nav-button active" : "nav-button"} href="/appointments">
@@ -83,22 +66,6 @@ export function AppNavigation({ active, children, role, title, subtitle, userLab
           )}
           {isAdmin ? (
             <>
-              <Link className={active === "dashboard" ? "nav-button active" : "nav-button"} href="/dashboard">
-                <ClipboardCheck size={18} />
-                Dashboard
-              </Link>
-              <Link className="nav-button" href="/api/reports/export">
-                <Printer size={18} />
-                Εξαγωγές
-              </Link>
-              <Link className={active === "notifications" ? "nav-button active" : "nav-button"} href="/notifications">
-                <ShieldCheck size={18} />
-                Κανόνες ειδοποιήσεων
-              </Link>
-              <Link className={active === "control" ? "nav-button active" : "nav-button"} href="/control">
-                <MailCheck size={18} />
-                Έλεγχος
-              </Link>
               <Link className={active === "schedule" ? "nav-button active" : "nav-button"} href="/schedule">
                 <CalendarClock size={18} />
                 Πρόγραμμα

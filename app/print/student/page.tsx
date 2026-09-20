@@ -109,7 +109,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
           </div>
           <div>
             <strong>{todayLabel()}</strong>
-            <span>Έκδοση από Mytilene Scholaris</span>
+            <span>Έκδοση από 1ο Πρότυπο Γυμνάσιο Μυτιλήνης &quot;Βύρων Σιβολαπένκο&quot;</span>
           </div>
         </header>
 

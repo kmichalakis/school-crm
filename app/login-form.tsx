@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { LogIn, ShieldCheck } from "lucide-react";
-import { appTitle, SchoolBrand } from "@/app/school-brand";
+import { appTitle, schoolName, SchoolBrand } from "@/app/school-brand";
 
 export function LoginForm() {
   const [username, setUsername] = useState("");
@@ -37,7 +37,7 @@ export function LoginForm() {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <SchoolBrand title={appTitle} subtitle="Ψηφιακή ροή απουσιολογίου" />
+        <SchoolBrand title={appTitle} subtitle={schoolName} />
 
         <form className="login-form" onSubmit={submitLogin}>
           <div className="login-title">

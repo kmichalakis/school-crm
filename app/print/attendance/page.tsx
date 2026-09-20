@@ -117,7 +117,7 @@ export default async function PrintAttendancePage({ searchParams }: PrintAttenda
           </div>
           <div>
             <strong>{todayLabel()}</strong>
-            <span>Έκδοση από Mytilene Scholaris</span>
+            <span>Έκδοση από 1ο Πρότυπο Γυμνάσιο Μυτιλήνης &quot;Βύρων Σιβολαπένκο&quot;</span>
           </div>
         </header>
 
