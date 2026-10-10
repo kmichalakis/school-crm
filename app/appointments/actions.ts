@@ -4,7 +4,7 @@ import { AppointmentStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { notifyCancelledAppointments } from "@/lib/appointments";
+import { appointmentNotificationSummary, notifyCancelledAppointments } from "@/lib/appointments";
 import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
@@ -63,9 +63,9 @@ export async function cancelAppointmentByAdminAction(formData: FormData) {
       cancelledAt: new Date()
     }
   });
-  await notifyCancelledAppointments([id], reason);
+  const notificationResult = await notifyCancelledAppointments([id], reason);
 
   revalidatePath("/appointments");
   revalidatePath("/parent");
-  appointmentsRedirect("Το ραντεβού ακυρώθηκε και έγινε προσπάθεια ενημέρωσης του γονέα.", "success", date, teacherId);
+  appointmentsRedirect(`Το ραντεβού ακυρώθηκε. ${appointmentNotificationSummary(notificationResult)}`, "success", date, teacherId);
 }

@@ -121,9 +121,25 @@ export async function sendAppointmentEmail(to: string, subject: string, body: st
   return { sent: true, reason: "" };
 }
 
+export type AppointmentNotificationResult = {
+  failed: number;
+  failureReasons: string[];
+  sent: number;
+  skipped: number;
+  total: number;
+};
+
 export async function notifyCancelledAppointments(appointmentIds: string[], reason: string) {
+  const result: AppointmentNotificationResult = {
+    failed: 0,
+    failureReasons: [],
+    sent: 0,
+    skipped: 0,
+    total: appointmentIds.length
+  };
+
   if (appointmentIds.length === 0) {
-    return;
+    return result;
   }
 
   const appointments = await prisma.parentTeacherAppointment.findMany({
@@ -136,23 +152,60 @@ export async function notifyCancelledAppointments(appointmentIds: string[], reas
   });
 
   for (const appointment of appointments) {
+    if (appointment.notifiedAt) {
+      result.skipped += 1;
+      continue;
+    }
+
     const dateValue = dateInputValue(appointment.date);
     const subject = "Ακύρωση ραντεβού με εκπαιδευτικό";
     const body = [
-      `Το ραντεβού για τον/τη μαθητή/μαθήτρια ${appointment.student.surname} ${appointment.student.name} ακυρώθηκε.`,
+      `Αγαπητέ/ή γονέα/κηδεμόνα,`,
+      "",
+      `Το ραντεβού για τον/τη μαθητή/μαθήτρια ${appointment.student.surname} ${appointment.student.name} ακυρώθηκε από το σχολείο.`,
       `Εκπαιδευτικός: ${appointment.teacher.surname} ${appointment.teacher.name}`,
       `Χρόνος: ${appointmentSlotLabel(dateValue, appointment.day, appointment.hour)}`,
-      reason ? `Αιτία: ${reason}` : ""
+      reason ? `Αιτία: ${reason}` : "",
+      "",
+      "Παρακαλούμε συνδεθείτε στην πλατφόρμα για να κλείσετε νέο ραντεβού, αν χρειάζεται."
     ]
       .filter(Boolean)
       .join("\n");
 
-    const result = await sendAppointmentEmail(appointment.parent.email, subject, body);
-    if (result.sent) {
+    const emailResult = await sendAppointmentEmail(appointment.parent.email, subject, body);
+    if (emailResult.sent) {
+      result.sent += 1;
       await prisma.parentTeacherAppointment.update({
         where: { id: appointment.id },
         data: { notifiedAt: new Date() }
       });
+    } else {
+      result.failed += 1;
+      if (emailResult.reason && !result.failureReasons.includes(emailResult.reason)) {
+        result.failureReasons.push(emailResult.reason);
+      }
     }
   }
+
+  result.total = appointments.length;
+  return result;
+}
+
+export function appointmentNotificationSummary(result: AppointmentNotificationResult) {
+  if (result.total === 0) {
+    return "Δεν υπήρχαν κρατημένα ραντεβού για αποστολή email.";
+  }
+
+  const parts = [`Email στάλθηκαν: ${result.sent}/${result.total}`];
+  if (result.skipped > 0) {
+    parts.push(`ήδη ενημερωμένα: ${result.skipped}`);
+  }
+  if (result.failed > 0) {
+    parts.push(`αποτυχίες: ${result.failed}`);
+  }
+  if (result.failureReasons.length > 0) {
+    parts.push(`αιτία: ${result.failureReasons.join(" | ")}`);
+  }
+
+  return parts.join(" · ");
 }

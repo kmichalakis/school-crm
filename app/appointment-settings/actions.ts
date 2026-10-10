@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import {
   appointmentDate,
+  appointmentNotificationSummary,
   getAppointmentSetting,
   isAppointmentDateAllowed,
   notifyCancelledAppointments
@@ -144,12 +145,12 @@ export async function addTeacherUnavailableDayAction(formData: FormData) {
       cancelledAt: new Date()
     }
   });
-  await notifyCancelledAppointments(appointmentsToCancel.map((appointment) => appointment.id), reason || "Ο/Η εκπαιδευτικός δεν είναι διαθέσιμος/η.");
+  const notificationResult = await notifyCancelledAppointments(appointmentsToCancel.map((appointment) => appointment.id), reason || "Ο/Η εκπαιδευτικός δεν είναι διαθέσιμος/η.");
 
   revalidatePath("/appointment-settings");
   revalidatePath("/appointments");
   revalidatePath("/parent");
-  settingsRedirect("Η απουσία εκπαιδευτικού καταχωρίστηκε και τα υπάρχοντα ραντεβού ακυρώθηκαν.", "success", tab);
+  settingsRedirect(`Η απουσία εκπαιδευτικού καταχωρίστηκε και τα υπάρχοντα ραντεβού ακυρώθηκαν. ${appointmentNotificationSummary(notificationResult)}`, "success", tab);
 }
 
 export async function deleteTeacherUnavailableDayAction(formData: FormData) {
@@ -202,12 +203,12 @@ export async function addBlockedDayAction(formData: FormData) {
       cancelledAt: new Date()
     }
   });
-  await notifyCancelledAppointments(appointmentsToCancel.map((appointment) => appointment.id), reason || "Η ημέρα ραντεβού ακυρώθηκε από το σχολείο.");
+  const notificationResult = await notifyCancelledAppointments(appointmentsToCancel.map((appointment) => appointment.id), reason || "Η ημέρα ραντεβού ακυρώθηκε από το σχολείο.");
 
   revalidatePath("/appointment-settings");
   revalidatePath("/appointments");
   revalidatePath("/parent");
-  settingsRedirect("Η ημέρα ακυρώθηκε και τα υπάρχοντα ραντεβού ενημερώθηκαν.", "success", tab);
+  settingsRedirect(`Η ημέρα ακυρώθηκε και τα υπάρχοντα ραντεβού ενημερώθηκαν. ${appointmentNotificationSummary(notificationResult)}`, "success", tab);
 }
 
 export async function deleteBlockedDayAction(formData: FormData) {
