@@ -3,9 +3,11 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { WeekDay } from "@prisma/client";
+import { sendSystemEmail } from "@/lib/email";
 import { dateInputValue, isAllowedSchoolDate, isWeekdayDate, isWithinSchoolYear } from "@/lib/school-calendar";
 import { formatDateInput, dateToWeekDay } from "@/lib/school-time";
 import { prisma } from "@/lib/prisma";
+import { hourLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 import { cookies } from "next/headers";
 
@@ -38,6 +40,97 @@ function finishScheduleAction(classId: string, date: string, message: string, ty
   });
 
   redirect(`/schedule?${params.toString()}`);
+}
+
+type ScheduleChangeEntry = {
+  courseId: string;
+  courseName: string;
+  isNoCourse: boolean;
+  teacherId: string | null;
+  teacherName: string;
+};
+
+function teacherFullName(teacher: { name: string; surname: string } | null | undefined) {
+  return teacher ? `${teacher.surname} ${teacher.name}` : "";
+}
+
+function scheduleSignature(entries: ScheduleChangeEntry[]) {
+  return entries
+    .filter((entry) => !entry.isNoCourse)
+    .map((entry) => `${entry.courseId}:${entry.teacherId ?? ""}`)
+    .sort()
+    .join("|");
+}
+
+function dateLabel(dateValue: string) {
+  return new Intl.DateTimeFormat("el-GR", {
+    dateStyle: "full",
+    timeZone: "Europe/Athens"
+  }).format(new Date(`${dateValue}T12:00:00`));
+}
+
+function describeScheduleChange(hour: number, entries: ScheduleChangeEntry[]) {
+  const visibleEntries = entries.filter((entry) => !entry.isNoCourse);
+
+  if (visibleEntries.length === 0) {
+    return `Την ${hourLabel(hour)} δεν θα γίνει μάθημα.`;
+  }
+
+  if (visibleEntries.length === 1) {
+    const [entry] = visibleEntries;
+    return `Την ${hourLabel(hour)} θα γίνει το μάθημα ${entry.courseName}${entry.teacherName ? ` από ${entry.teacherName}` : ""}.`;
+  }
+
+  const lessons = visibleEntries
+    .map((entry) => `${entry.courseName}${entry.teacherName ? ` από ${entry.teacherName}` : ""}`)
+    .join(", ");
+  return `Την ${hourLabel(hour)} θα γίνουν τα μαθήματα ${lessons}.`;
+}
+
+async function notifyParentsForScheduleChanges(classId: string, className: string, date: string, changes: string[]) {
+  if (changes.length === 0) {
+    return { failed: 0, sent: 0, total: 0 };
+  }
+
+  const students = await prisma.student.findMany({
+    where: { classId, parent: { email: { not: "" } } },
+    include: { parent: true }
+  });
+  const recipients = Array.from(
+    new Map(
+      students
+        .map((student) => student.parent)
+        .filter((parent): parent is NonNullable<(typeof students)[number]["parent"]> => Boolean(parent?.email))
+        .map((parent) => [parent.email.trim().toLowerCase(), parent.email.trim()])
+    ).values()
+  );
+
+  let sent = 0;
+  let failed = 0;
+  const subject = `Αλλαγή προγράμματος ${className} - ${dateLabel(date)}`;
+  const body = [
+    "Αγαπητέ/ή γονέα/κηδεμόνα,",
+    "",
+    `Σας ενημερώνουμε ότι υπάρχει αλλαγμένο πρόγραμμα για το τμήμα ${className} την ${dateLabel(date)}.`,
+    "Μπορείτε να δείτε το πλήρες πρόγραμμα στην πλατφόρμα.",
+    "",
+    "Σύντομη περιγραφή αλλαγών:",
+    ...changes.map((change) => `- ${change}`),
+    "",
+    "Με εκτίμηση,",
+    "1ο Πρότυπο Γυμνάσιο Μυτιλήνης"
+  ].join("\n");
+
+  for (const email of recipients) {
+    const result = await sendSystemEmail(email, subject, body);
+    if (result.sent) {
+      sent += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return { failed, sent, total: recipients.length };
 }
 
 async function nextNoCourseAa(classId: string) {
@@ -220,6 +313,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
   const selectedCourseIdsByHour = new Map<number, string[]>();
   const selectedTeacherIdsByHourPosition = new Map<string, string>();
   const allCourseIds = new Set<string>();
+  const allSelectedTeacherIds = new Set<string>();
 
   for (let hour = 1; hour <= 7; hour += 1) {
     const courseIds = [text(formData, `hour-${hour}-course-0`), text(formData, `hour-${hour}-course-1`)].filter(Boolean);
@@ -234,6 +328,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
       const teacherId = text(formData, `hour-${hour}-teacher-${position}`);
       if (teacherId) {
         selectedTeacherIdsByHourPosition.set(`${hour}-${position}`, teacherId);
+        allSelectedTeacherIds.add(teacherId);
       }
     });
     for (const courseId of uniqueCourseIds) {
@@ -262,6 +357,43 @@ export async function saveDailyScheduleAction(formData: FormData) {
 
   const [noCourse, substitutionCourse] = await Promise.all([ensureNoCourse(classId), ensureSubstitutionCourse(classId)]);
   courseById.set(substitutionCourse.id, substitutionCourse);
+  courseById.set(noCourse.id, noCourse);
+  const [selectedTeachers, weeklySlots] = await Promise.all([
+    prisma.teacher.findMany({
+      where: { id: { in: Array.from(allSelectedTeacherIds) } }
+    }),
+    prisma.scheduleSlot.findMany({
+      where: { classId, day },
+      include: {
+        course: {
+          include: {
+            teachers: {
+              include: {
+                teacher: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: [{ hour: "asc" }, { course: { name: "asc" } }]
+    })
+  ]);
+  const teacherById = new Map(selectedTeachers.map((teacher) => [teacher.id, teacher]));
+  const weeklyEntriesByHour = new Map<number, ScheduleChangeEntry[]>();
+  for (const slot of weeklySlots) {
+    const teacher = slot.course.teachers[0]?.teacher ?? null;
+    weeklyEntriesByHour.set(slot.hour, [
+      ...(weeklyEntriesByHour.get(slot.hour) ?? []),
+      {
+        courseId: slot.courseId,
+        courseName: slot.course.name,
+        isNoCourse: slot.course.isNoCourse,
+        teacherId: teacher?.id ?? null,
+        teacherName: teacherFullName(teacher)
+      }
+    ]);
+  }
+
   const existingSheets = await prisma.attendanceSheet.findMany({
     where: {
       classId,
@@ -283,6 +415,42 @@ export async function saveDailyScheduleAction(formData: FormData) {
         "Δεν μπορεί να αλλάξει πρόγραμμα σε ώρα που έχει ήδη απουσίες ή υπογραφή.",
         "error"
       );
+    }
+  }
+
+  const scheduleChangeDescriptions: string[] = [];
+
+  for (let hour = 1; hour <= 7; hour += 1) {
+    const selectedCourseIds = selectedCourseIdsByHour.get(hour) ?? [];
+    const effectiveCourseIds = selectedCourseIds.length > 0 ? selectedCourseIds : [noCourse.id];
+    const selectedCourses = effectiveCourseIds.map((courseId) => courseById.get(courseId) ?? noCourse);
+    const selectedEntries = selectedCourses.map((course, position) => {
+      const selectedTeacherId = selectedTeacherIdsByHourPosition.get(`${hour}-${position}`);
+      const teacher = course.isSubstitution
+        ? selectedTeacherId
+          ? teacherById.get(selectedTeacherId)
+          : null
+        : (course.teachers[0]?.teacher ?? null);
+
+      if (course.isSubstitution && !selectedTeacherId) {
+        finishScheduleAction(classId, date, "Στην ΑΝΑΠΛΗΡΩΣΗ πρέπει να οριστεί εκπαιδευτικός.", "error");
+      }
+
+      if (course.isSubstitution && selectedTeacherId && !teacher) {
+        finishScheduleAction(classId, date, "Ο εκπαιδευτικός αναπλήρωσης δεν βρέθηκε.", "error");
+      }
+
+      return {
+        courseId: course.id,
+        courseName: course.name,
+        isNoCourse: course.isNoCourse,
+        teacherId: teacher?.id ?? null,
+        teacherName: teacherFullName(teacher)
+      };
+    });
+
+    if (scheduleSignature(selectedEntries) !== scheduleSignature(weeklyEntriesByHour.get(hour) ?? [])) {
+      scheduleChangeDescriptions.push(describeScheduleChange(hour, selectedEntries));
     }
   }
 
@@ -357,11 +525,23 @@ export async function saveDailyScheduleAction(formData: FormData) {
     }
   });
 
+  const emailResult = await notifyParentsForScheduleChanges(classId, classRecord.name, date, scheduleChangeDescriptions);
+
   revalidatePath("/schedule");
   revalidatePath("/");
   revalidatePath("/teacher");
   revalidatePath("/pending");
-  finishScheduleAction(classId, date, "Το ημερήσιο πρόγραμμα αποθηκεύτηκε.");
+  revalidatePath("/parent");
+
+  if (scheduleChangeDescriptions.length === 0) {
+    finishScheduleAction(classId, date, "Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Δεν εντοπίστηκαν αλλαγές σε σχέση με το εβδομαδιαίο πρόγραμμα.");
+  }
+
+  finishScheduleAction(
+    classId,
+    date,
+    `Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Email γονέων: ${emailResult.sent}/${emailResult.total}${emailResult.failed > 0 ? `, αποτυχίες: ${emailResult.failed}` : ""}.`
+  );
 }
 
 export async function toggleScheduleHolidayAction(formData: FormData) {
