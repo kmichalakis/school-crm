@@ -3,15 +3,10 @@ import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 const iterations = 120_000;
 const keyLength = 32;
 const digest = "sha256";
-const minimumPasswordLength = 4;
 
 export function validatePasswordPolicy(password: string, username?: string) {
   const issues: string[] = [];
   const normalizedUsername = username?.trim().toLowerCase();
-
-  if (password.length < minimumPasswordLength) {
-    issues.push(`Ο κωδικός πρέπει να έχει τουλάχιστον ${minimumPasswordLength} χαρακτήρες.`);
-  }
 
   if (normalizedUsername && password.toLowerCase().includes(normalizedUsername)) {
     issues.push("Ο κωδικός δεν πρέπει να περιέχει το username.");

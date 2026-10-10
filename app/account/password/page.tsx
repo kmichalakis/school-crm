@@ -50,7 +50,7 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Νέος κωδικός</h2>
-          <p>Ο κωδικός πρέπει να έχει τουλάχιστον 10 χαρακτήρες, γράμματα και αριθμούς.</p>
+          <p>Ο κωδικός μπορεί να είναι σύντομος ή αριθμητικό PIN, αρκεί να μην περιέχει το username.</p>
         </div>
         <form action={changePasswordAction} className="admin-form compact-form password-form">
           <div className="field">
