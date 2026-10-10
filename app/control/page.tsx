@@ -271,7 +271,7 @@ export default async function ControlPage({ searchParams }: ControlPageProps) {
           </button>
         </form>
         <p className="form-hint">
-          Αν δεν υπάρχουν `RESEND_API_KEY` και `EMAIL_FROM` στο Vercel, οι ενημερώσεις μένουν στην ουρά ειδοποιήσεων για χειροκίνητο έλεγχο.
+          Αν δεν έχουν ρυθμιστεί Gmail SMTP ή Resend στο Vercel, οι ενημερώσεις μένουν στην ουρά ειδοποιήσεων για χειροκίνητο έλεγχο.
         </p>
       </section>
 

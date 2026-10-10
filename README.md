@@ -65,7 +65,9 @@
    NEXTAUTH_SECRET=ένα μεγάλο τυχαίο secret
    ADMIN_USERNAME=admin
    ADMIN_PASSWORD=ένας ισχυρός αρχικός κωδικός
-   EMAIL_FROM=attendance@example.com
+   GMAIL_USER=school.email@gmail.com
+   GMAIL_APP_PASSWORD=app-password-από-Google
+   EMAIL_FROM="1ο Πρότυπο Γυμνάσιο Μυτιλήνης <school.email@gmail.com>"
    ```
 
 5. Το `vercel-build` θα τρέξει αυτόματα:
@@ -82,6 +84,6 @@
 
 ## Επόμενα βήματα
 
-- Κανόνες και αποστολή πραγματικών email
+- Αυτοματοποιημένη αποστολή email με Vercel Cron
 - Πιο αναλυτικά reports ανά περίοδο
 - Ρόλοι και δικαιώματα ανά σχολική μονάδα

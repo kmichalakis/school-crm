@@ -1,4 +1,5 @@
 import { AppointmentStatus, type WeekDay } from "@prisma/client";
+import { sendSystemEmail } from "@/lib/email";
 import { dateInputValue, isAllowedSchoolDate } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
@@ -93,32 +94,7 @@ export function appointmentSlotLabel(dateValue: string, day: WeekDay, hour: numb
 }
 
 export async function sendAppointmentEmail(to: string, subject: string, body: string) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
-
-  if (!apiKey || !from) {
-    return { sent: false, reason: "Δεν έχουν οριστεί RESEND_API_KEY και EMAIL_FROM." };
-  }
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from,
-      to,
-      subject,
-      text: body
-    })
-  });
-
-  if (!response.ok) {
-    return { sent: false, reason: await response.text() };
-  }
-
-  return { sent: true, reason: "" };
+  return sendSystemEmail(to, subject, body);
 }
 
 export type AppointmentNotificationResult = {

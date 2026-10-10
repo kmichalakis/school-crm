@@ -4,6 +4,7 @@ import { AbsenceStatus, EmailTrigger, ParentNotificationStatus } from "@prisma/c
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { sendSystemEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { dateToWeekDay } from "@/lib/school-time";
@@ -43,36 +44,6 @@ function greekDateLabel(date: Date) {
     dateStyle: "full",
     timeZone: "Europe/Athens"
   }).format(date);
-}
-
-async function sendEmail(to: string, subject: string, body: string) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
-
-  if (!apiKey || !from) {
-    return { sent: false, reason: "Δεν έχει ρυθμιστεί RESEND_API_KEY ή EMAIL_FROM στο Vercel." };
-  }
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from,
-      to,
-      subject,
-      text: body
-    })
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    return { sent: false, reason: details.slice(0, 180) || "Αποτυχία αποστολής από τον email provider." };
-  }
-
-  return { sent: true, reason: "" };
 }
 
 export async function sendTodayFirstHourAbsenceEmailsAction(formData: FormData) {
@@ -192,7 +163,7 @@ export async function sendTodayFirstHourAbsenceEmailsAction(formData: FormData) 
     });
     queued += 1;
 
-    const result = await sendEmail(parent.email, subject, body);
+    const result = await sendSystemEmail(parent.email, subject, body);
     if (result.sent) {
       sent += 1;
       await prisma.parentNotification.update({
