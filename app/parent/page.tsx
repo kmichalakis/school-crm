@@ -630,6 +630,9 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                   )}
                 </div>
                 <div className="section-actions">
+                  <Link className="secondary-button" href="/parent/appointments-report">
+                    Εκτύπωση / PDF
+                  </Link>
                   <Link
                     className="secondary-button"
                     href={
