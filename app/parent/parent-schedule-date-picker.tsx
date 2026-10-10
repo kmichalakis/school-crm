@@ -15,7 +15,7 @@ export function ParentScheduleDatePicker({ date, maxDate, minDate, studentId }: 
   return (
     <div className="inline-form date-selector-form">
       <label>
-        Ημερομηνία
+        Συγκεκριμένη ημερομηνία
         <input
           max={maxDate}
           min={minDate}
@@ -24,9 +24,11 @@ export function ParentScheduleDatePicker({ date, maxDate, minDate, studentId }: 
             setSelectedDate(nextDate);
             const params = new URLSearchParams({
               view: "schedule",
-              studentId,
-              date: nextDate
+              studentId
             });
+            if (nextDate) {
+              params.set("date", nextDate);
+            }
             window.location.href = `/parent?${params.toString()}`;
           }}
           type="date"

@@ -5,6 +5,7 @@ import type { WeekDay } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
 import { saveDailyScheduleAction, toggleScheduleHolidayAction } from "@/app/schedule/actions";
 import { HolidayToggleForm } from "@/app/schedule/holiday-toggle-form";
+import { ScheduleChangeHighlighter } from "@/app/schedule/schedule-change-highlighter";
 import { ScheduleDatePicker } from "@/app/schedule/schedule-date-picker";
 import { dateInputValue, isAllowedSchoolDate, isWeekdayDate, isWithinSchoolYear } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
@@ -76,6 +77,22 @@ function courseOptionLabel(course: {
     return "ΑΝΑΠΛΗΡΩΣΗ";
   }
   return teachers ? `${course.name} · ${teachers}` : course.name;
+}
+
+function scheduleSignature(entries: Array<{ courseId: string; teacherId?: string | null }>) {
+  return entries
+    .filter((entry) => entry.courseId)
+    .map((entry) => `${entry.courseId}:${entry.teacherId ?? ""}`)
+    .sort()
+    .join("|");
+}
+
+function scheduleFormSignature(entries: Array<{ courseId: string; isSubstitution?: boolean; teacherId?: string | null }>) {
+  return entries
+    .filter((entry) => entry.courseId)
+    .map((entry) => `${entry.courseId}:${entry.isSubstitution ? (entry.teacherId ?? "") : ""}`)
+    .sort()
+    .join("|");
 }
 
 export default async function SchedulePage({ searchParams }: SchedulePageProps) {
@@ -342,18 +359,46 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                 <form action={saveDailyScheduleAction} className="daily-schedule-form" key={`${selectedClass.id}-${selectedDate}`}>
                   <input name="classId" type="hidden" value={selectedClass.id} />
                   <input name="date" type="hidden" value={selectedDate} />
+                  <ScheduleChangeHighlighter />
+                  <p className="form-hint changed-schedule-note">Οι χρωματισμένες ώρες διαφέρουν από το εβδομαδιαίο πρόγραμμα.</p>
                   {schoolHours.map((schoolHour) => {
                     const sheet = dailySheetByHour.get(schoolHour.hour);
-                    const storedCourseIds = sheet?.courses.map((entry) => entry.courseId) ?? [];
+                    const storedCourseEntries = sheet?.courses.filter((entry) => !entry.course.isNoCourse) ?? [];
+                    const storedCourseIds = storedCourseEntries.map((entry) => entry.courseId);
                     const weeklySlots = slotsByDayHour.get(`${selectedDay}-${schoolHour.hour}`) ?? [];
-                    const defaultCourseIds = storedCourseIds.length > 0 ? storedCourseIds : weeklySlots.map((slot) => slot.courseId);
+                    const weeklyEffectiveSignature = scheduleSignature(
+                      weeklySlots.map((slot) => ({
+                        courseId: slot.courseId,
+                        teacherId: slot.course.teachers[0]?.teacher.id ?? null
+                      }))
+                    );
+                    const weeklyFormSignature = scheduleFormSignature(
+                      weeklySlots.map((slot) => ({
+                        courseId: slot.courseId,
+                        isSubstitution: slot.course.isSubstitution,
+                        teacherId: null
+                      }))
+                    );
+                    const storedSignature = scheduleSignature(
+                      storedCourseEntries.map((entry) => ({
+                        courseId: entry.courseId,
+                        teacherId: entry.teacherId ?? entry.course.teachers[0]?.teacher.id ?? null
+                      }))
+                    );
+                    const rowChanged = Boolean(sheet) && storedSignature !== weeklyEffectiveSignature;
+                    const defaultCourseIds = sheet ? storedCourseIds : weeklySlots.map((slot) => slot.courseId);
                     const firstCourseId = defaultCourseIds[0] ?? "";
                     const secondCourseId = defaultCourseIds[1] ?? "";
-                    const firstTeacherId = sheet?.courses[0]?.teacherId ?? "";
-                    const secondTeacherId = sheet?.courses[1]?.teacherId ?? "";
+                    const firstTeacherId = storedCourseEntries[0]?.teacherId ?? "";
+                    const secondTeacherId = storedCourseEntries[1]?.teacherId ?? "";
 
                     return (
-                      <div className="daily-schedule-row" key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}`}>
+                      <div
+                        className={rowChanged ? "daily-schedule-row changed" : "daily-schedule-row"}
+                        data-baseline-signature={weeklyFormSignature}
+                        data-daily-schedule-row
+                        key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}`}
+                      >
                         <div className="schedule-hour">
                           <strong>{hourLabel(schoolHour.hour)}</strong>
                           <span>
@@ -363,13 +408,14 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                         <label>
                           Μάθημα 1
                           <select
+                            data-course-position="0"
                             defaultValue={firstCourseId}
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-course-0`}
                             name={`hour-${schoolHour.hour}-course-0`}
                           >
                             <option value="">ΚΕΝΟ / χωρίς μάθημα</option>
                             {courseOptions.map((course) => (
-                              <option key={course.id} value={course.id}>
+                              <option data-substitution={course.isSubstitution ? "true" : undefined} key={course.id} value={course.id}>
                                 {courseOptionLabel(course)}
                               </option>
                             ))}
@@ -378,6 +424,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                         <label>
                           Εκπαιδευτικός 1
                           <select
+                            data-teacher-position="0"
                             defaultValue={firstTeacherId}
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-teacher-0`}
                             name={`hour-${schoolHour.hour}-teacher-0`}
@@ -393,13 +440,14 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                         <label>
                           Μάθημα 2
                           <select
+                            data-course-position="1"
                             defaultValue={secondCourseId}
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-course-1`}
                             name={`hour-${schoolHour.hour}-course-1`}
                           >
                             <option value="">Χωρίς δεύτερο μάθημα</option>
                             {courseOptions.map((course) => (
-                              <option key={course.id} value={course.id}>
+                              <option data-substitution={course.isSubstitution ? "true" : undefined} key={course.id} value={course.id}>
                                 {courseOptionLabel(course)}
                               </option>
                             ))}
@@ -408,6 +456,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                         <label>
                           Εκπαιδευτικός 2
                           <select
+                            data-teacher-position="1"
                             defaultValue={secondTeacherId}
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-teacher-1`}
                             name={`hour-${schoolHour.hour}-teacher-1`}

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus, AppointmentStatus, type WeekDay } from "@prisma/client";
-import { ShieldCheck, Users } from "lucide-react";
+import { CalendarClock, ShieldCheck, Users } from "lucide-react";
 import { LogoutButton } from "@/app/logout-button";
 import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
 import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
@@ -14,7 +14,7 @@ import { dateInputValue, isAllowedSchoolDate, type SchoolCalendarException, type
 import { prisma } from "@/lib/prisma";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import { dateToWeekDay, formatDateInput, schoolHours } from "@/lib/school-time";
+import { dateToWeekDay, formatDateInput, schoolHours, weekDays } from "@/lib/school-time";
 
 type ParentPageProps = {
   searchParams: Promise<{
@@ -29,8 +29,8 @@ type ParentPageProps = {
 
 type ParentView = "absences" | "schedule" | "appointments";
 
-function parentVisibleView(): ParentView {
-  return "appointments";
+function parentVisibleView(value: string | undefined): ParentView {
+  return value === "schedule" ? "schedule" : "appointments";
 }
 
 function dateOnly(value: string) {
@@ -96,6 +96,24 @@ function teacherLabel(course: {
   return course.teachers.map((link) => `${link.teacher.surname} ${link.teacher.name}`).join(", ");
 }
 
+function entryTeacherLabel(entry: {
+  course: Parameters<typeof teacherLabel>[0];
+  teacher?: {
+    name: string;
+    surname: string;
+  } | null;
+}) {
+  return entry.teacher ? `${entry.teacher.surname} ${entry.teacher.name}` : teacherLabel(entry.course);
+}
+
+function scheduleSignature(entries: Array<{ courseId: string; teacherId?: string | null }>) {
+  return entries
+    .filter((entry) => entry.courseId)
+    .map((entry) => `${entry.courseId}:${entry.teacherId ?? ""}`)
+    .sort()
+    .join("|");
+}
+
 function absenceGroupStatusLabel(statuses: AbsenceStatus[]) {
   const uniqueStatuses = Array.from(new Set(statuses));
   if (uniqueStatuses.length === 1) {
@@ -121,7 +139,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   }
 
   const params = await searchParams;
-  const view = parentVisibleView();
+  const view = parentVisibleView(params.view);
   const notice = params.notice ?? "";
   const noticeType = params.noticeType === "error" ? "error" : "success";
   const showAppointmentHistory = params.history === "appointments";
@@ -168,6 +186,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   const isAbsencesView = view === "absences";
   const isScheduleView = view === "schedule";
   const isAppointmentsView = view === "appointments";
+  const hasExplicitScheduleDate = isScheduleView && Boolean(params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date));
+  const scheduleDate = hasExplicitScheduleDate ? selectedDate : "";
+  const scheduleDay = scheduleDate ? (dateToWeekDay(scheduleDate) as WeekDay | null) : null;
+  const scheduleDateIsWorking = scheduleDay ? isAllowedSchoolDate(scheduleDate, schoolYearBounds, calendarExceptions) : false;
   const absences =
     isAbsencesView && studentIds.length > 0
       ? await prisma.attendanceSheetAbsence.findMany({
@@ -188,11 +210,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
       : [];
 
   const scheduleSlots =
-    isScheduleView && selectedClass && selectedDay && selectedDateIsWorking
+    isScheduleView && selectedClass
       ? await prisma.scheduleSlot.findMany({
           where: {
-            classId: selectedClass.id,
-            day: selectedDay
+            classId: selectedClass.id
           },
           include: {
             course: {
@@ -203,19 +224,20 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
               }
             }
           },
-          orderBy: [{ hour: "asc" }, { course: { name: "asc" } }]
+          orderBy: [{ day: "asc" }, { hour: "asc" }, { course: { name: "asc" } }]
         })
       : [];
   const dailySheets =
-    isScheduleView && selectedClass && selectedDateIsWorking
+    isScheduleView && selectedClass && scheduleDate && scheduleDateIsWorking
       ? await prisma.attendanceSheet.findMany({
           where: {
             classId: selectedClass.id,
-            date: dateOnly(selectedDate)
+            date: dateOnly(scheduleDate)
           },
           include: {
             courses: {
               include: {
+                teacher: true,
                 course: {
                   include: {
                     teachers: {
@@ -230,9 +252,38 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
         })
       : [];
   const dailySheetByHour = new Map(dailySheets.map((sheet) => [sheet.hour, sheet]));
-  const weeklySlotsByHour = new Map<number, typeof scheduleSlots>();
+  const weeklySlotsByDayHour = new Map<string, typeof scheduleSlots>();
   for (const slot of scheduleSlots) {
-    weeklySlotsByHour.set(slot.hour, [...(weeklySlotsByHour.get(slot.hour) ?? []), slot]);
+    const key = `${slot.day}-${slot.hour}`;
+    weeklySlotsByDayHour.set(key, [...(weeklySlotsByDayHour.get(key) ?? []), slot]);
+  }
+  const changedScheduleHours = new Set<number>();
+  if (scheduleDay) {
+    for (const schoolHour of schoolHours) {
+      const dailySheet = dailySheetByHour.get(schoolHour.hour);
+      if (!dailySheet) {
+        continue;
+      }
+
+      const dailyEntries = dailySheet.courses.filter((entry) => !entry.course.isNoCourse);
+      const weeklySlots = weeklySlotsByDayHour.get(`${scheduleDay}-${schoolHour.hour}`) ?? [];
+      const dailySignature = scheduleSignature(
+        dailyEntries.map((entry) => ({
+          courseId: entry.courseId,
+          teacherId: entry.teacherId ?? entry.course.teachers[0]?.teacher.id ?? null
+        }))
+      );
+      const weeklySignature = scheduleSignature(
+        weeklySlots.map((slot) => ({
+          courseId: slot.courseId,
+          teacherId: slot.course.teachers[0]?.teacher.id ?? null
+        }))
+      );
+
+      if (dailySignature !== weeklySignature) {
+        changedScheduleHours.add(schoolHour.hour);
+      }
+    }
   }
 
   const absencesByStudent = new Map(parent.students.map((student) => [student.id, absences.filter((absence) => absence.studentId === student.id)]));
@@ -353,6 +404,13 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
             <Users size={18} />
             Ραντεβού
           </Link>
+          <Link
+            className={view === "schedule" ? "nav-button active" : "nav-button"}
+            href={`/parent?view=schedule${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}`}
+          >
+            <CalendarClock size={18} />
+            Πρόγραμμα
+          </Link>
         </nav>
 
         <section className="main-grid">
@@ -466,77 +524,154 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
             <section className="admin-section">
               <div className="admin-section-title">
                 <h2>Πρόγραμμα</h2>
-                <p>Επιλέξτε μαθητή και ημερομηνία για να δείτε το πρόγραμμα του αντίστοιχου τμήματος.</p>
+                <p>Δείτε το εβδομαδιαίο πρόγραμμα ή επιλέξτε συγκεκριμένη ημερομηνία για την ημερήσια εικόνα.</p>
               </div>
 
               <div className="parent-schedule-controls">
                 <div className="class-tabs">
-                  {parent.students.map((student) => (
-                    <Link
-                      className={selectedStudent?.id === student.id ? "class-tab active" : "class-tab"}
-                      href={`/parent?view=schedule&studentId=${student.id}&date=${selectedDate}`}
-                      key={student.id}
-                    >
-                      {student.surname} {student.name}
-                      <span>{student.class.name}</span>
-                    </Link>
-                  ))}
+                  {parent.students.map((student) => {
+                    const studentScheduleParams = new URLSearchParams({
+                      view: "schedule",
+                      studentId: student.id
+                    });
+                    if (scheduleDate) {
+                      studentScheduleParams.set("date", scheduleDate);
+                    }
+
+                    return (
+                      <Link
+                        className={selectedStudent?.id === student.id ? "class-tab active" : "class-tab"}
+                        href={`/parent?${studentScheduleParams.toString()}`}
+                        key={student.id}
+                      >
+                        {student.surname} {student.name}
+                        <span>{student.class.name}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
                 {selectedClass && schoolYearBounds ? (
-                  <ParentScheduleDatePicker
-                    date={selectedDate}
-                    maxDate={schoolYearBounds.endsOn}
-                    minDate={schoolYearBounds.startsOn}
-                    studentId={selectedStudent?.id ?? ""}
-                  />
+                  <div className="parent-schedule-date-row">
+                    <ParentScheduleDatePicker
+                      date={scheduleDate}
+                      maxDate={schoolYearBounds.endsOn}
+                      minDate={schoolYearBounds.startsOn}
+                      studentId={selectedStudent?.id ?? ""}
+                    />
+                    {scheduleDate ? (
+                      <Link className="secondary-button" href={`/parent?view=schedule${selectedStudent ? `&studentId=${selectedStudent.id}` : ""}`}>
+                        Εβδομαδιαίο πρόγραμμα
+                      </Link>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
 
               {selectedClass ? (
                 <div className="parent-schedule-heading">
                   <strong>
-                    {selectedClass.name} · {fullDateLabel(selectedDate)}
+                    {selectedClass.name} · {scheduleDate ? fullDateLabel(scheduleDate) : "Εβδομαδιαίο πρόγραμμα"}
                   </strong>
-                  <span>{selectedDateIsWorking ? "Εργάσιμη ημέρα" : "Αργία"}</span>
+                  <span>{scheduleDate ? (scheduleDateIsWorking ? "Εργάσιμη ημέρα" : "Αργία") : selectedClass.schoolYear.name}</span>
                 </div>
               ) : null}
 
               {!selectedClass ? (
                 <div className="empty-state">Δεν υπάρχουν συνδεδεμένοι μαθητές.</div>
-              ) : !selectedDateIsWorking ? (
+              ) : scheduleDate && !scheduleDateIsWorking ? (
                 <div className="empty-state">Αργία. Δεν υπάρχουν μαθήματα για την επιλεγμένη ημερομηνία.</div>
-              ) : (
-                <div className="parent-schedule-list">
-                  {schoolHours.map((schoolHour) => {
-                    const dailySheet = dailySheetByHour.get(schoolHour.hour);
-                    const dailyCourses = dailySheet?.courses.map((entry) => entry.course) ?? [];
-                    const weeklySlots = weeklySlotsByHour.get(schoolHour.hour) ?? [];
-                    const courses = dailyCourses.length > 0 ? dailyCourses : weeklySlots.map((slot) => slot.course);
-                    const visibleCourses = courses.filter((course) => !course.isNoCourse);
-                    return (
-                      <article className="parent-schedule-row" key={schoolHour.hour}>
+              ) : !scheduleDate ? (
+                <>
+                  <div className="schedule-grid parent-weekly-schedule-grid">
+                    <div className="schedule-head">Ώρα</div>
+                    {weekDays.map((day) => (
+                      <div className="schedule-head" key={day.value}>
+                        {day.label}
+                      </div>
+                    ))}
+
+                    {schoolHours.map((schoolHour) => (
+                      <div className="schedule-row" key={schoolHour.hour}>
                         <div className="schedule-hour">
                           <strong>{hourLabel(schoolHour.hour)}</strong>
                           <span>
                             {schoolHour.starts}-{schoolHour.ends}
                           </span>
                         </div>
-                        <div className="schedule-cell-course-list">
-                          {visibleCourses.length > 0 ? (
-                            visibleCourses.map((course) => (
-                              <div className="schedule-cell-course" key={course.id}>
-                                <strong>{course.name}</strong>
-                                <span>{teacherLabel(course) || "Χωρίς εκπαιδευτικό"}</span>
-                              </div>
-                            ))
-                          ) : (
-                            <span>ΚΕΝΟ</span>
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
+                        {weekDays.map((day) => {
+                          const slots = weeklySlotsByDayHour.get(`${day.value}-${schoolHour.hour}`) ?? [];
+                          const visibleSlots = slots.filter((slot) => !slot.course.isNoCourse);
+
+                          return (
+                            <div className="schedule-cell" key={`${day.value}-${schoolHour.hour}`}>
+                              {visibleSlots.length > 0 ? (
+                                visibleSlots.map((slot) => (
+                                  <div className="schedule-cell-course" key={slot.id}>
+                                    <strong>{slot.course.name}</strong>
+                                    <span>{teacherLabel(slot.course) || "Χωρίς εκπαιδευτικό"}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <span>ΚΕΝΟ</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="form-hint">Για έκτακτες αλλαγές, επιλέξτε συγκεκριμένη ημερομηνία από το ημερολόγιο.</p>
+                </>
+              ) : (
+                <>
+                  {changedScheduleHours.size > 0 ? (
+                    <p className="form-hint changed-schedule-note">Οι χρωματισμένες ώρες είναι έκτακτες αλλαγές σε σχέση με το εβδομαδιαίο πρόγραμμα.</p>
+                  ) : null}
+                  <div className="parent-schedule-list">
+                    {schoolHours.map((schoolHour) => {
+                      const dailySheet = dailySheetByHour.get(schoolHour.hour);
+                      const dailyEntries = dailySheet?.courses.filter((entry) => !entry.course.isNoCourse) ?? [];
+                      const weeklySlots = weeklySlotsByDayHour.get(`${scheduleDay}-${schoolHour.hour}`) ?? [];
+                      const visibleWeeklySlots = weeklySlots.filter((slot) => !slot.course.isNoCourse);
+                      const rowChanged = changedScheduleHours.has(schoolHour.hour);
+                      const hasDailyOverride = Boolean(dailySheet);
+
+                      return (
+                        <article className={rowChanged ? "parent-schedule-row changed" : "parent-schedule-row"} key={schoolHour.hour}>
+                          <div className="schedule-hour">
+                            <strong>{hourLabel(schoolHour.hour)}</strong>
+                            <span>
+                              {schoolHour.starts}-{schoolHour.ends}
+                            </span>
+                          </div>
+                          <div className="schedule-cell-course-list">
+                            {hasDailyOverride ? (
+                              dailyEntries.length > 0 ? (
+                                dailyEntries.map((entry) => (
+                                  <div className="schedule-cell-course" key={entry.id}>
+                                    <strong>{entry.course.name}</strong>
+                                    <span>{entryTeacherLabel(entry) || "Χωρίς εκπαιδευτικό"}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <span>ΚΕΝΟ</span>
+                              )
+                            ) : visibleWeeklySlots.length > 0 ? (
+                              visibleWeeklySlots.map((slot) => (
+                                <div className="schedule-cell-course" key={slot.id}>
+                                  <strong>{slot.course.name}</strong>
+                                  <span>{teacherLabel(slot.course) || "Χωρίς εκπαιδευτικό"}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <span>ΚΕΝΟ</span>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </section>
           ) : (
