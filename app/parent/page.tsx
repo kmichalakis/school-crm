@@ -51,6 +51,11 @@ function fullDateLabel(dateValue: string) {
   return `${dayLabel} ${shortDateLabel(dateValue)}`;
 }
 
+function appointmentHourLabel(hour: number) {
+  const schoolHour = schoolHours.find((slot) => slot.hour === hour);
+  return schoolHour ? `${schoolHour.label} · ${schoolHour.starts}-${schoolHour.ends}` : hourLabel(hour);
+}
+
 function nextWorkingDate(bounds: SchoolYearDateBounds | null, exceptions: SchoolCalendarException[]) {
   const start = new Date();
   start.setDate(start.getDate() + 1);
@@ -369,7 +374,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
         <div>
           <strong>{appointmentDateLabel(dateValue, appointment.day)}</strong>
           <span>
-            {hourLabel(appointment.hour)} · {appointment.teacher.surname} {appointment.teacher.name}
+            {appointmentHourLabel(appointment.hour)} · {appointment.teacher.surname} {appointment.teacher.name}
           </span>
           <span>
             {appointment.student.surname} {appointment.student.name} · {appointment.student.class.name}
@@ -738,7 +743,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                           key,
                           teacherId: officeHour.teacherId,
                           teacherName: `${officeHour.teacher.surname} ${officeHour.teacher.name}`,
-                          hourLabel: hourLabel(officeHour.hour),
+                          hourLabel: appointmentHourLabel(officeHour.hour),
                           disabledReason: unavailable
                             ? "Μη διαθέσιμος/η"
                             : full
