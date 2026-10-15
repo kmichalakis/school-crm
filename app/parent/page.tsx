@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus, AppointmentStatus, type WeekDay } from "@prisma/client";
-import { CalendarClock, ShieldCheck, Users } from "lucide-react";
+import { CalendarClock, FileDown, ShieldCheck, Users } from "lucide-react";
 import { LogoutButton } from "@/app/logout-button";
 import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
 import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
@@ -391,13 +391,19 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
+      <header className="topbar parent-topbar">
         <SchoolBrand title="Πύλη γονέα" subtitle={`${parent.surname} ${parent.name}`} />
         <div className="user-chip">
           <ShieldCheck size={17} />
           {session.username}
         </div>
-        <LogoutButton />
+        <div className="parent-header-actions">
+          <a className="secondary-button" href="/odigies-xrisis-gonea.pdf" download="Οδηγίες χρήσης γονέα.pdf">
+            <FileDown size={17} />
+            Οδηγίες Χρήσης
+          </a>
+          <LogoutButton />
+        </div>
       </header>
 
       <div className="workspace">

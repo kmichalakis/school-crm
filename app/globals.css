@@ -194,6 +194,17 @@ button:disabled {
   font-size: 14px;
 }
 
+.login-manual-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--primary-dark);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .admin-shell {
   display: grid;
   gap: 22px;
@@ -469,6 +480,23 @@ button:disabled {
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+.parent-topbar {
+  flex-wrap: wrap;
+}
+
+.parent-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.parent-header-actions .secondary-button {
+  text-decoration: none;
+  white-space: nowrap;
 }
 
 .brand {
@@ -2076,6 +2104,15 @@ button:disabled {
   .topbar {
     align-items: flex-start;
     padding: 14px;
+  }
+
+  .parent-header-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .parent-header-actions .secondary-button {
+    flex: 1;
   }
 
   .brand h1 {

@@ -1,13 +1,13 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { LogIn, ShieldCheck } from "lucide-react";
+import { FileDown, LogIn, ShieldCheck } from "lucide-react";
 import { appTitle, schoolName, SchoolBrand } from "@/app/school-brand";
 
 export function LoginForm() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("Σύνδεση με λογαριασμό τάξης ή εκπαιδευτικού.");
+  const [message, setMessage] = useState("Σύνδεση με τον λογαριασμό σας.");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
@@ -68,6 +68,10 @@ export function LoginForm() {
 
           <p className="login-message">{message}</p>
         </form>
+        <a className="login-manual-link" href="/odigies-xrisis-gonea.pdf" download="Οδηγίες χρήσης γονέα.pdf">
+          <FileDown size={18} />
+          Λήψη οδηγιών χρήσης γονέα (PDF)
+        </a>
       </section>
     </main>
   );
