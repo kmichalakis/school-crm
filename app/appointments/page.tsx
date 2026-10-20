@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AppointmentStatus, type WeekDay } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
 import { cancelAppointmentByAdminAction } from "@/app/appointments/actions";
+import { CancelledAppointments } from "@/app/appointments/cancelled-appointments";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting, nextWeekdayDate } from "@/lib/appointments";
 import { appointmentWhereForSession, loadAppointmentRows, type AppointmentRow, validAppointmentDate } from "@/lib/appointment-queries";
 import { dateInputValue } from "@/lib/school-calendar";
@@ -73,14 +74,18 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   }
   const appointments = canSelectTeacher ? await loadAppointmentRows(appointmentQuery.where, appointmentQuery.showAllDaysForTeacher) : [];
   const teacherAppointments = !canSelectTeacher && currentTeacher ? await loadAppointmentRows(appointmentQuery.where, false) : [];
-  const todayTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) === today);
-  const upcomingTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) > today);
+  const bookedAppointments = appointments.filter((appointment) => appointment.status === AppointmentStatus.BOOKED);
+  const cancelledAppointments = appointments.filter((appointment) => appointment.status !== AppointmentStatus.BOOKED);
+  const todayTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) === today && appointment.status === AppointmentStatus.BOOKED);
+  const cancelledTodayTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) === today && appointment.status !== AppointmentStatus.BOOKED);
+  const upcomingTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) > today && appointment.status === AppointmentStatus.BOOKED);
+  const cancelledUpcomingTeacherAppointments = teacherAppointments.filter((appointment) => dateInputValue(appointment.date) > today && appointment.status !== AppointmentStatus.BOOKED);
   const groupedAppointmentsByHour = new Map<number, AppointmentRow[]>();
-  for (const appointment of appointments) {
+  for (const appointment of bookedAppointments) {
     groupedAppointmentsByHour.set(appointment.hour, [...(groupedAppointmentsByHour.get(appointment.hour) ?? []), appointment]);
   }
   const groupedAppointmentsByDate = new Map<string, AppointmentRow[]>();
-  for (const appointment of appointments) {
+  for (const appointment of bookedAppointments) {
     const dateValue = dateInputValue(appointment.date);
     groupedAppointmentsByDate.set(dateValue, [...(groupedAppointmentsByDate.get(dateValue) ?? []), appointment]);
   }
@@ -223,11 +228,14 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
               <section className="admin-section">
                 <div className="admin-section-title">
                   <h2>{showAllDaysForTeacher ? "Ραντεβού εκπαιδευτικού" : appointmentDateLabel(selectedDate, selectedDay)}</h2>
-                  <p>{appointments.length} εγγραφές</p>
+                  <p>{bookedAppointments.length} ενεργά ραντεβού</p>
                 </div>
                 <div className="appointment-list">
-                  {appointments.length > 0 ? appointments.map((appointment) => renderAppointment(appointment, isAdmin)) : <div className="empty-state">Δεν υπάρχουν ραντεβού με τα επιλεγμένα φίλτρα.</div>}
+                  {bookedAppointments.length > 0 ? bookedAppointments.map((appointment) => renderAppointment(appointment, isAdmin)) : <div className="empty-state">Δεν υπάρχουν ενεργά ραντεβού με τα επιλεγμένα φίλτρα.</div>}
                 </div>
+                <CancelledAppointments count={cancelledAppointments.length}>
+                  {cancelledAppointments.map((appointment) => renderAppointment(appointment, false))}
+                </CancelledAppointments>
               </section>
 
               <section className="admin-section">
@@ -351,7 +359,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
             <section className="admin-section">
               <div className="admin-section-title">
                 <h2>Ραντεβού εκπαιδευτικού</h2>
-                <p>{appointments.length} εγγραφές σε όλες τις ημέρες.</p>
+                <p>{bookedAppointments.length} ενεργά ραντεβού σε όλες τις ημέρες.</p>
               </div>
               <div className="appointment-group-list">
                 {groupedAppointmentsByDate.size > 0 ? (
@@ -362,15 +370,18 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                     </section>
                   ))
                 ) : (
-                  <div className="empty-state">Δεν υπάρχουν ραντεβού για τον επιλεγμένο εκπαιδευτικό.</div>
+                  <div className="empty-state">Δεν υπάρχουν ενεργά ραντεβού για τον επιλεγμένο εκπαιδευτικό.</div>
                 )}
               </div>
+              <CancelledAppointments count={cancelledAppointments.length}>
+                {cancelledAppointments.map((appointment) => renderAppointment(appointment, false))}
+              </CancelledAppointments>
             </section>
           ) : (
             <section className="admin-section">
               <div className="admin-section-title">
                 <h2>{appointmentDateLabel(selectedDate, selectedDay)}</h2>
-                <p>{appointments.length} ραντεβού ημέρας</p>
+                <p>{bookedAppointments.length} ενεργά ραντεβού ημέρας</p>
               </div>
               <div className="appointment-group-list">
                 {groupedAppointmentsByHour.size > 0 ? (
@@ -381,9 +392,12 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                     </section>
                   ))
                 ) : (
-                  <div className="empty-state">Δεν υπάρχουν ραντεβού για την επιλεγμένη ημέρα.</div>
+                  <div className="empty-state">Δεν υπάρχουν ενεργά ραντεβού για την επιλεγμένη ημέρα.</div>
                 )}
               </div>
+              <CancelledAppointments count={cancelledAppointments.length}>
+                {cancelledAppointments.map((appointment) => renderAppointment(appointment, false))}
+              </CancelledAppointments>
             </section>
           )}
         </>
@@ -395,8 +409,11 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
               <p>{appointmentDateLabel(today)}</p>
             </div>
             <div className="appointment-list">
-              {todayTeacherAppointments.length > 0 ? todayTeacherAppointments.map((appointment) => renderAppointment(appointment, false)) : <div className="empty-state">Δεν έχετε ραντεβού σήμερα.</div>}
+              {todayTeacherAppointments.length > 0 ? todayTeacherAppointments.map((appointment) => renderAppointment(appointment, false)) : <div className="empty-state">Δεν έχετε ενεργά ραντεβού σήμερα.</div>}
             </div>
+            <CancelledAppointments count={cancelledTodayTeacherAppointments.length}>
+              {cancelledTodayTeacherAppointments.map((appointment) => renderAppointment(appointment, false))}
+            </CancelledAppointments>
           </section>
           <section className="admin-section">
             <div className="admin-section-title">
@@ -407,9 +424,12 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
               {upcomingTeacherAppointments.length > 0 ? (
                 upcomingTeacherAppointments.map((appointment) => renderAppointment(appointment, false))
               ) : (
-                <div className="empty-state">Δεν υπάρχουν μελλοντικά ραντεβού.</div>
+                <div className="empty-state">Δεν υπάρχουν ενεργά μελλοντικά ραντεβού.</div>
               )}
             </div>
+            <CancelledAppointments count={cancelledUpcomingTeacherAppointments.length}>
+              {cancelledUpcomingTeacherAppointments.map((appointment) => renderAppointment(appointment, false))}
+            </CancelledAppointments>
           </section>
         </>
       )}

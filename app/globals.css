@@ -1459,6 +1459,22 @@ button:disabled {
   gap: 10px;
 }
 
+.cancelled-appointments {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  width: 100%;
+}
+
+.cancelled-appointments > .appointment-list {
+  width: 100%;
+}
+
+.cancelled-appointment-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .appointment-dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

@@ -7,6 +7,7 @@ import { LogoutButton } from "@/app/logout-button";
 import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
 import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
 import { ParentCancelAppointmentForm } from "@/app/parent/parent-cancel-appointment-form";
+import { CancelledAppointments } from "@/app/appointments/cancelled-appointments";
 import { ParentScheduleDatePicker } from "@/app/parent/parent-schedule-date-picker";
 import { SchoolBrand } from "@/app/school-brand";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting } from "@/lib/appointments";
@@ -363,8 +364,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
       .map((appointment) => appointment.teacherId)
   );
   const today = dateInputValue(new Date());
-  const futureParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) >= today);
-  const pastParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) < today);
+  const futureParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) >= today && appointment.status === AppointmentStatus.BOOKED);
+  const cancelledFutureParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) >= today && appointment.status !== AppointmentStatus.BOOKED);
+  const pastParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) < today && appointment.status === AppointmentStatus.BOOKED);
+  const cancelledPastParentAppointments = parentAppointments.filter((appointment) => dateInputValue(appointment.date) < today && appointment.status !== AppointmentStatus.BOOKED);
 
   function renderParentAppointment(appointment: (typeof parentAppointments)[number], canCancel: boolean) {
     const dateValue = dateInputValue(appointment.date);
@@ -772,9 +775,12 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                   {futureParentAppointments.length > 0 ? (
                     futureParentAppointments.map((appointment) => renderParentAppointment(appointment, true))
                   ) : (
-                    <div className="empty-state">Δεν έχετε σημερινά ή μελλοντικά ραντεβού.</div>
+                    <div className="empty-state">Δεν έχετε ενεργά σημερινά ή μελλοντικά ραντεβού.</div>
                   )}
                 </div>
+                <CancelledAppointments count={cancelledFutureParentAppointments.length}>
+                  {cancelledFutureParentAppointments.map((appointment) => renderParentAppointment(appointment, false))}
+                </CancelledAppointments>
                 <div className="section-actions">
                   <Link className="secondary-button" href="/parent/appointments-report">
                     Εκτύπωση / PDF
@@ -791,13 +797,18 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                   </Link>
                 </div>
                 {showAppointmentHistory ? (
-                  <div className="appointment-list">
-                    {pastParentAppointments.length > 0 ? (
-                      pastParentAppointments.map((appointment) => renderParentAppointment(appointment, false))
-                    ) : (
-                      <div className="empty-state">Δεν υπάρχει παλιό ιστορικό ραντεβού.</div>
-                    )}
-                  </div>
+                  <>
+                    <div className="appointment-list">
+                      {pastParentAppointments.length > 0 ? (
+                        pastParentAppointments.map((appointment) => renderParentAppointment(appointment, false))
+                      ) : (
+                        <div className="empty-state">Δεν υπάρχουν παλαιότερα ενεργά ραντεβού.</div>
+                      )}
+                    </div>
+                    <CancelledAppointments count={cancelledPastParentAppointments.length}>
+                      {cancelledPastParentAppointments.map((appointment) => renderParentAppointment(appointment, false))}
+                    </CancelledAppointments>
+                  </>
                 ) : null}
               </section>
             </>
