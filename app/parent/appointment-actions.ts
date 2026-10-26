@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { appointmentDate, getAppointmentSetting, isAppointmentDateAllowed } from "@/lib/appointments";
+import { bookableTeacherIdsForClass } from "@/lib/appointment-teachers";
 import { prisma } from "@/lib/prisma";
 import { parentStudents } from "@/lib/family";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
@@ -90,6 +91,10 @@ export async function bookParentAppointmentsAction(formData: FormData) {
   const uniqueChoices = Array.from(new Map(choices.map((choice) => [choice.teacherId, choice])).values());
   if (uniqueChoices.length < choices.length) {
     parentRedirect("Μπορείτε να κλείσετε μόνο ένα ραντεβού με κάθε εκπαιδευτικό την ίδια ημέρα.", "error", date, selectedStudent.id);
+  }
+  const bookableTeacherIds = await bookableTeacherIdsForClass(selectedStudent.classId);
+  if (uniqueChoices.some((choice) => !bookableTeacherIds.has(choice.teacherId))) {
+    parentRedirect("Μπορείτε να κλείσετε ραντεβού μόνο με εκπαιδευτικούς του τμήματος ή τη διευθύντρια Θωμαΐδη.", "error", date, selectedStudent.id);
   }
   let createdCount = 0;
 

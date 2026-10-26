@@ -11,6 +11,7 @@ import { CancelledAppointments } from "@/app/appointments/cancelled-appointments
 import { ParentScheduleDatePicker } from "@/app/parent/parent-schedule-date-picker";
 import { SchoolBrand } from "@/app/school-brand";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting } from "@/lib/appointments";
+import { bookableTeacherIdsForClass } from "@/lib/appointment-teachers";
 import { dateInputValue, isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
 import { parentStudents } from "@/lib/family";
@@ -320,7 +321,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
       ];
     })
   );
-  const [appointmentSetting, blockedAppointmentDay, parentAppointments, appointmentOfficeHours, appointmentUnavailableDays, appointmentCounts] =
+  const [appointmentSetting, blockedAppointmentDay, parentAppointments, appointmentOfficeHours, appointmentUnavailableDays, appointmentCounts, bookableTeacherIds] =
     isAppointmentsView
       ? await Promise.all([
           getAppointmentSetting(),
@@ -358,9 +359,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                 },
                 _count: { _all: true }
               })
-            : Promise.resolve([])
+            : Promise.resolve([]),
+          selectedClass ? bookableTeacherIdsForClass(selectedClass.id) : Promise.resolve(new Set<string>())
         ])
-      : [{ maxPerTeacherSlot: 1 }, null, [], [], [], []];
+      : [{ maxPerTeacherSlot: 1 }, null, [], [], [], [], new Set<string>()];
   const unavailableTeacherIds = new Set(appointmentUnavailableDays.map((day) => day.teacherId));
   const bookedCountBySlot = new Map(appointmentCounts.map((entry) => [`${entry.teacherId}:${entry.hour}`, entry._count._all]));
   const parentActiveAppointmentKeys = new Set(
@@ -766,13 +768,16 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                         const unavailable = unavailableTeacherIds.has(officeHour.teacherId);
                         const full = bookedCount >= appointmentSetting.maxPerTeacherSlot;
                         const alreadyBooked = parentActiveAppointmentTeacherIds.has(officeHour.teacherId) || parentActiveAppointmentKeys.has(key);
+                        const isClassTeacher = bookableTeacherIds.has(officeHour.teacherId);
                         return {
                           key,
                           teacherId: officeHour.teacherId,
                           teacherName: `${officeHour.teacher.surname} ${officeHour.teacher.name}`,
                           hourLabel: appointmentHourLabel(officeHour.hour),
-                          disabledReason: unavailable
-                            ? "Μη διαθέσιμος/η"
+                          disabledReason: !isClassTeacher
+                            ? "Μη εκπαιδευτικός τμήματος"
+                            : unavailable
+                              ? "Μη διαθέσιμος/η"
                             : full
                               ? "Πλήρης ώρα"
                               : alreadyBooked
