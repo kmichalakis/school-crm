@@ -70,6 +70,23 @@ function optionalText(formData: FormData, key: string) {
   return value.length > 0 ? value : null;
 }
 
+export async function updateScreenManagerEmailAction(formData: FormData) {
+  await requireAdmin();
+  const email = optionalText(formData, "screenManagerEmail")?.toLowerCase() ?? null;
+
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    finishAdminAction("Δώστε έγκυρο email διαχειριστή οθόνης.", "error");
+  }
+
+  await prisma.schoolSetting.upsert({
+    where: { id: "school" },
+    update: { screenManagerEmail: email },
+    create: { id: "school", screenManagerEmail: email }
+  });
+
+  finishAdminAction(email ? "Το email διαχειριστή οθόνης αποθηκεύτηκε." : "Η αποστολή στον διαχειριστή οθόνης απενεργοποιήθηκε.");
+}
+
 function checked(formData: FormData, key: string) {
   return formData.get(key) === "on";
 }

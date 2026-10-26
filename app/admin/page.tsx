@@ -21,6 +21,7 @@ import {
   upsertClassAction,
   upsertCourseAction,
   upsertParentAction,
+  updateScreenManagerEmailAction,
   upsertStudentAction,
   upsertTeacherAction
 } from "@/app/admin/actions";
@@ -96,7 +97,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     redirect("/");
   }
 
-  const [schoolYears, classes, teachers, students, parents, courses, scheduleSlots] = await Promise.all([
+  const [schoolYears, classes, teachers, students, parents, courses, scheduleSlots, schoolSetting] = await Promise.all([
     prisma.schoolYear.findMany({
       orderBy: [{ status: "asc" }, { startsOn: "desc" }]
     }),
@@ -155,7 +156,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         }
       },
       orderBy: [{ classId: "asc" }, { day: "asc" }, { hour: "asc" }]
-    })
+    }),
+    prisma.schoolSetting.findUnique({ where: { id: "school" } })
   ]);
 
   const greekCollator = new Intl.Collator("el", { sensitivity: "base" });
@@ -206,6 +208,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
       {activeTab === "setup" ? (
         <>
+          <section className="admin-section">
+            <div className="admin-section-title">
+              <h2>Διαχειριστής οθόνης</h2>
+              <p>Λαμβάνει email για τις προσωρινές αλλαγές προγράμματος των τμημάτων, επιπλέον των γονέων.</p>
+            </div>
+            <form action={updateScreenManagerEmailAction} className="admin-form compact-form">
+              <label className="field">
+                Email διαχειριστή οθόνης
+                <input name="screenManagerEmail" type="email" defaultValue={schoolSetting?.screenManagerEmail ?? ""} placeholder="email@example.com" />
+              </label>
+              <button className="primary-button" type="submit">Αποθήκευση</button>
+            </form>
+          </section>
+
           <section className="admin-section">
             <div className="admin-section-title">
               <h2>Εισαγωγή δεδομένων από Excel</h2>

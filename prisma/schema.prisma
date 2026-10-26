@@ -389,6 +389,13 @@ model AppointmentSetting {
   updatedAt         DateTime @updatedAt
 }
 
+model SchoolSetting {
+  id                 String   @id
+  screenManagerEmail String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
 model TeacherOfficeHour {
   id        String   @id @default(cuid())
   teacherId String
