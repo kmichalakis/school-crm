@@ -460,6 +460,12 @@ button:disabled {
   font-size: 14px;
 }
 
+.admin-row .parent-student-names {
+  color: var(--foreground);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .editable-row {
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }

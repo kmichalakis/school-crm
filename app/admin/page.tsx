@@ -158,6 +158,22 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     })
   ]);
 
+  const greekCollator = new Intl.Collator("el", { sensitivity: "base" });
+  const parentsWithStudents = parents
+    .map((parent) => ({
+      parent,
+      children: parentStudents(parent).sort((a, b) =>
+        greekCollator.compare(a.surname, b.surname) || greekCollator.compare(a.name, b.name)
+      )
+    }))
+    .sort((a, b) => {
+      if (!a.children.length) return b.children.length ? 1 : greekCollator.compare(a.parent.email, b.parent.email);
+      if (!b.children.length) return -1;
+      return greekCollator.compare(a.children[0].surname, b.children[0].surname)
+        || greekCollator.compare(a.children[0].name, b.children[0].name)
+        || greekCollator.compare(a.parent.email, b.parent.email);
+    });
+
   const activeYear = schoolYears.find((schoolYear) => schoolYear.status === "ACTIVE") ?? schoolYears[0];
   const params = await searchParams;
   const noticeType = params.noticeType === "error" ? "error" : "success";
@@ -465,17 +481,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         </form>
 
         <div className="admin-table">
-          {parents.map((parent) => (
+          {parentsWithStudents.map(({ parent, children }) => (
             <form action={upsertParentAction} className="admin-row editable-row" key={parent.id}>
               <input name="id" type="hidden" value={parent.id} />
               <input name="userId" type="hidden" value={parent.userId} />
+              <span className="parent-student-names">
+                {children.length ? children.map((child) => `${child.surname} ${child.name}`).join(" · ") : "Χωρίς μαθητή"}
+              </span>
               <input name="email" defaultValue={parent.email} type="email" required />
               <input name="password" placeholder="νέος κωδικός" type="password" />
               <label className="check-field">
                 <input name="mustChangePassword" type="checkbox" defaultChecked={parent.user.mustChangePassword} />
                 Αλλαγή
               </label>
-              <span>{parentStudents(parent).length} μαθητές</span>
+              <span>{children.length} μαθητές</span>
               <button className="secondary-button" type="submit">
                 Αποθήκευση
               </button>
