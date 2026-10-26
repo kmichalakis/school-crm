@@ -128,12 +128,11 @@ model User {
 
 model Parent {
   id                    String                       @id @default(cuid())
-  name                  String
-  surname               String
   email                 String
   userId                String                       @unique
   user                  User                         @relation(fields: [userId], references: [id])
-  students              Student[]
+  students              Student[]                    @relation("PrimaryStudentParent")
+  secondaryStudents     Student[]                    @relation("SecondaryStudentParent")
   notifications         ParentNotification[]
   justificationRequests ParentJustificationRequest[]
   appointments          ParentTeacherAppointment[]
@@ -170,9 +169,11 @@ model Student {
   patronymic            String
   classId               String
   parentId              String?
+  secondParentId        String?
   schoolYearId          String
   class                 Class                        @relation(fields: [classId], references: [id])
-  parent                Parent?                      @relation(fields: [parentId], references: [id])
+  parent                Parent?                      @relation("PrimaryStudentParent", fields: [parentId], references: [id])
+  secondParent          Parent?                      @relation("SecondaryStudentParent", fields: [secondParentId], references: [id])
   schoolYear            SchoolYear                   @relation(fields: [schoolYearId], references: [id])
   absences              Absence[]
   sheetAbsences         AttendanceSheetAbsence[]
@@ -184,6 +185,7 @@ model Student {
 
   @@unique([schoolYearId, am])
   @@index([classId, surname])
+  @@index([secondParentId])
 }
 
 model Course {

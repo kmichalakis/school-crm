@@ -1,5 +1,5 @@
 type SchoolBrandProps = {
-  subtitle: string;
+  subtitle?: string;
   title: string;
 };
 
@@ -18,7 +18,7 @@ export function SchoolBrand({ subtitle, title }: SchoolBrandProps) {
       />
       <div>
         <h1>{title}</h1>
-        <span>{subtitle}</span>
+        {subtitle ? <span>{subtitle}</span> : null}
       </div>
     </div>
   );

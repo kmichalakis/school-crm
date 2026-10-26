@@ -7,6 +7,7 @@ import { appTitle, schoolName } from "@/app/school-brand";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel } from "@/lib/appointments";
 import { dateInputValue } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
+import { parentStudents } from "@/lib/family";
 import { hourLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
@@ -37,6 +38,10 @@ export default async function ParentAppointmentsReportPage() {
             include: { schoolYear: true }
           }
         },
+        orderBy: [{ surname: "asc" }, { name: "asc" }]
+      },
+      secondaryStudents: {
+        include: { class: { include: { schoolYear: true } } },
         orderBy: [{ surname: "asc" }, { name: "asc" }]
       },
       appointments: {
@@ -84,14 +89,8 @@ export default async function ParentAppointmentsReportPage() {
 
         <section className="print-meta-grid">
           <div>
-            <span>Γονέας/Κηδεμόνας</span>
-            <strong>
-              {parent.surname} {parent.name}
-            </strong>
-          </div>
-          <div>
-            <span>Email</span>
-            <strong>{parent.email}</strong>
+            <span>Email γονέα</span>
+            <strong style={{ overflowWrap: "anywhere" }}>{parent.email}</strong>
           </div>
           <div>
             <span>Περίοδος</span>
@@ -114,7 +113,7 @@ export default async function ParentAppointmentsReportPage() {
           </div>
           <div className="panel metric">
             <span>Μαθητές</span>
-            <strong>{parent.students.length}</strong>
+            <strong>{parentStudents(parent).length}</strong>
           </div>
         </section>
 

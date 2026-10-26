@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     sessionUserId: session.userId
   });
   const appointments = await loadAppointmentRows(query.where, query.showAllDaysForTeacher);
-  const header = ["Ημερομηνία", "Ώρα", "Κατάσταση", "Εκπαιδευτικός", "Μαθητής/τρια", "Τμήμα", "Γονέας", "Email γονέα", "Αιτία ακύρωσης"];
+  const header = ["Ημερομηνία", "Ώρα", "Κατάσταση", "Εκπαιδευτικός", "Μαθητής/τρια", "Τμήμα", "Email γονέα", "Αιτία ακύρωσης"];
   const rows = appointments.map((appointment) => {
     const dateValue = dateInputValue(appointment.date);
     return [
@@ -32,7 +32,6 @@ export async function GET(request: NextRequest) {
       `${appointment.teacher.surname} ${appointment.teacher.name}`,
       `${appointment.student.surname} ${appointment.student.name}`,
       appointment.student.class.name,
-      `${appointment.parent.surname} ${appointment.parent.name}`,
       appointment.parent.email,
       appointment.cancellationReason ?? ""
     ];

@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sendSystemEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
+import { studentParents } from "@/lib/family";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { dateToWeekDay } from "@/lib/school-time";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
@@ -83,12 +84,13 @@ export async function sendTodayFirstHourAbsenceEmailsAction(formData: FormData) 
         hour: 1,
         class: { schoolYearId: schoolYear.id }
       },
-      student: { parentId: { not: null } }
+      student: { OR: [{ parentId: { not: null } }, { secondParentId: { not: null } }] }
     },
     include: {
       student: {
         include: {
           parent: true,
+          secondParent: true,
           class: true
         }
       },
@@ -118,8 +120,8 @@ export async function sendTodayFirstHourAbsenceEmailsAction(formData: FormData) 
   const failures: string[] = [];
 
   for (const absence of absences) {
-    const parent = absence.student.parent;
-    if (!parent?.email) {
+    const parents = studentParents(absence.student).filter((parent) => parent.email.trim());
+    if (parents.length === 0) {
       missingEmail += 1;
       continue;
     }
@@ -137,46 +139,48 @@ export async function sendTodayFirstHourAbsenceEmailsAction(formData: FormData) 
       `Μάθημα: ${courseNames}.`
     ].join("\n");
 
-    const notification = await prisma.parentNotification.upsert({
-      where: {
-        parentId_studentId_sheetId_type: {
+    for (const parent of parents) {
+      const notification = await prisma.parentNotification.upsert({
+        where: {
+          parentId_studentId_sheetId_type: {
+            parentId: parent.id,
+            studentId: absence.studentId,
+            sheetId: absence.sheetId,
+            type: EmailTrigger.FIRST_HOUR_ABSENCE
+          }
+        },
+        update: {
+          subject,
+          body,
+          status: ParentNotificationStatus.QUEUED,
+          sentAt: null
+        },
+        create: {
           parentId: parent.id,
           studentId: absence.studentId,
           sheetId: absence.sheetId,
-          type: EmailTrigger.FIRST_HOUR_ABSENCE
-        }
-      },
-      update: {
-        subject,
-        body,
-        status: ParentNotificationStatus.QUEUED,
-        sentAt: null
-      },
-      create: {
-        parentId: parent.id,
-        studentId: absence.studentId,
-        sheetId: absence.sheetId,
-        type: EmailTrigger.FIRST_HOUR_ABSENCE,
-        subject,
-        body
-      }
-    });
-    queued += 1;
-
-    const result = await sendSystemEmail(parent.email, subject, body);
-    if (result.sent) {
-      sent += 1;
-      await prisma.parentNotification.update({
-        where: { id: notification.id },
-        data: {
-          status: ParentNotificationStatus.SENT,
-          sentAt: new Date()
+          type: EmailTrigger.FIRST_HOUR_ABSENCE,
+          subject,
+          body
         }
       });
-    } else {
-      failed += 1;
-      if (failures.length < 2) {
-        failures.push(result.reason);
+      queued += 1;
+
+      const result = await sendSystemEmail(parent.email, subject, body);
+      if (result.sent) {
+        sent += 1;
+        await prisma.parentNotification.update({
+          where: { id: notification.id },
+          data: {
+            status: ParentNotificationStatus.SENT,
+            sentAt: new Date()
+          }
+        });
+      } else {
+        failed += 1;
+        if (failures.length < 2) {
+          failures.push(result.reason);
+        }
       }
     }
   }

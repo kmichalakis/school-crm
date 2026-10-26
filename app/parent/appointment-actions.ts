@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { appointmentDate, getAppointmentSetting, isAppointmentDateAllowed } from "@/lib/appointments";
 import { prisma } from "@/lib/prisma";
+import { parentStudents } from "@/lib/family";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
 function text(formData: FormData, key: string) {
@@ -38,14 +39,14 @@ async function requireParent() {
 
   const parent = await prisma.parent.findUnique({
     where: { userId: session.userId },
-    include: { students: true }
+    include: { students: true, secondaryStudents: true }
   });
 
   if (!parent) {
     redirect("/");
   }
 
-  return parent;
+  return { ...parent, students: parentStudents(parent) };
 }
 
 function parseChoice(choice: string) {

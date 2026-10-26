@@ -6,6 +6,7 @@ import { PrintButton } from "@/app/print/print-button";
 import { appTitle, schoolName } from "@/app/school-brand";
 import { dateInputValue } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
+import { parentStudents } from "@/lib/family";
 import { absenceStatusLabel, hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
@@ -70,6 +71,17 @@ export default async function ParentAbsencesReportPage({ searchParams }: ParentA
           }
         },
         orderBy: [{ surname: "asc" }, { name: "asc" }]
+      },
+      secondaryStudents: {
+        include: {
+          class: { include: { schoolYear: true } },
+          sheetAbsences: {
+            where: { absent: true, status: { not: AbsenceStatus.REMOVED } },
+            include: { sheet: { include: { course: true } } },
+            orderBy: [{ sheet: { date: "desc" } }, { sheet: { hour: "asc" } }]
+          }
+        },
+        orderBy: [{ surname: "asc" }, { name: "asc" }]
       }
     }
   });
@@ -78,7 +90,8 @@ export default async function ParentAbsencesReportPage({ searchParams }: ParentA
     redirect("/");
   }
 
-  const reportStudents = params.studentId ? parent.students.filter((student) => student.id === params.studentId) : parent.students;
+  const linkedStudents = parentStudents(parent);
+  const reportStudents = params.studentId ? linkedStudents.filter((student) => student.id === params.studentId) : linkedStudents;
 
   if (params.studentId && reportStudents.length === 0) {
     redirect("/parent?view=absences");
@@ -107,14 +120,8 @@ export default async function ParentAbsencesReportPage({ searchParams }: ParentA
 
         <section className="print-meta-grid">
           <div>
-            <span>Γονέας/Κηδεμόνας</span>
-            <strong>
-              {parent.surname} {parent.name}
-            </strong>
-          </div>
-          <div>
-            <span>Email</span>
-            <strong>{parent.email}</strong>
+            <span>Email γονέα</span>
+            <strong style={{ overflowWrap: "anywhere" }}>{parent.email}</strong>
           </div>
           <div>
             <span>Μαθητές αναφοράς</span>

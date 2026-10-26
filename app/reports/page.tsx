@@ -297,7 +297,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                   <div>
                     <strong>{request.sheet.course.name}</strong>
                     <span>
-                      Γονέας: {request.parent.surname} {request.parent.name}
+                      Γονέας: {request.parent.email}
                     </span>
                   </div>
                   <span className={request.status === ParentJustificationStatus.APPROVED ? "sync-pill ready" : "sync-pill"}>

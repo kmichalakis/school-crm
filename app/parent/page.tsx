@@ -13,6 +13,7 @@ import { SchoolBrand } from "@/app/school-brand";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting } from "@/lib/appointments";
 import { dateInputValue, isAllowedSchoolDate, type SchoolCalendarException, type SchoolYearDateBounds } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
+import { parentStudents } from "@/lib/family";
 import { hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 import { dateToWeekDay, formatDateInput, schoolHours, weekDays } from "@/lib/school-time";
@@ -163,6 +164,14 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
           }
         },
         orderBy: [{ surname: "asc" }, { name: "asc" }]
+      },
+      secondaryStudents: {
+        include: {
+          class: {
+            include: { schoolYear: { include: { calendarDays: true } } }
+          }
+        },
+        orderBy: [{ surname: "asc" }, { name: "asc" }]
       }
     }
   });
@@ -171,7 +180,8 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
     redirect("/");
   }
 
-  const selectedStudent = parent.students.find((student) => student.id === params.studentId) ?? parent.students[0] ?? null;
+  const linkedStudents = parentStudents(parent);
+  const selectedStudent = linkedStudents.find((student) => student.id === params.studentId) ?? linkedStudents[0] ?? null;
   const selectedClass = selectedStudent?.class ?? null;
   const schoolYearBounds = selectedClass
     ? {
@@ -188,7 +198,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   const selectedDate = validDateParam(params.date, defaultScheduleDate, schoolYearBounds);
   const selectedDay = dateToWeekDay(selectedDate) as WeekDay | null;
   const selectedDateIsWorking = selectedDay ? isAllowedSchoolDate(selectedDate, schoolYearBounds, calendarExceptions) : false;
-  const studentIds = parent.students.map((student) => student.id);
+  const studentIds = linkedStudents.map((student) => student.id);
   const isAbsencesView = view === "absences";
   const isScheduleView = view === "schedule";
   const isAppointmentsView = view === "appointments";
@@ -292,9 +302,9 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
     }
   }
 
-  const absencesByStudent = new Map(parent.students.map((student) => [student.id, absences.filter((absence) => absence.studentId === student.id)]));
+  const absencesByStudent = new Map(linkedStudents.map((student) => [student.id, absences.filter((absence) => absence.studentId === student.id)]));
   const absenceGroupsByStudent = new Map(
-    parent.students.map((student) => {
+    linkedStudents.map((student) => {
       const groups = new Map<string, typeof absences>();
       for (const absence of absencesByStudent.get(student.id) ?? []) {
         const sheetDate = dateInputValue(absence.sheet.date);
@@ -395,10 +405,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
   return (
     <main className="app-shell">
       <header className="topbar parent-topbar">
-        <SchoolBrand title="Πύλη γονέα" subtitle={`${parent.surname} ${parent.name}`} />
+        <SchoolBrand title="Πύλη γονέα" />
         <div className="user-chip">
           <ShieldCheck size={17} />
-          {session.username}
+          {parent.email}
         </div>
         <div className="parent-header-actions">
           <a className="secondary-button" href="/odigies-xrisis-gonea.pdf" download="Οδηγίες χρήσης γονέα.pdf">
@@ -428,6 +438,14 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
         </nav>
 
         <section className="main-grid">
+          <div className="parent-children-summary">
+            <strong>Τα παιδιά μου</strong>
+            <span>
+              {linkedStudents.length > 0
+                ? linkedStudents.map((student) => `${student.surname} ${student.name} (${student.class.name})`).join(" · ")
+                : "Δεν έχει συνδεθεί μαθητής με αυτό το email."}
+            </span>
+          </div>
           {notice ? (
             <div className={noticeType === "error" ? "status-message error" : "status-message success"}>
               <span className="status-message-main">
@@ -449,7 +467,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                   </Link>
                 </div>
                 <div className="parent-student-grid">
-                  {parent.students.map((student) => {
+                  {linkedStudents.map((student) => {
                     const studentAbsences = absencesByStudent.get(student.id) ?? [];
                     const excused = studentAbsences.filter((absence) => absence.status === AbsenceStatus.EXCUSED).length;
                     return (
@@ -476,7 +494,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
                 </div>
               </section>
 
-              {parent.students.map((student) => {
+              {linkedStudents.map((student) => {
                 const studentAbsences = absencesByStudent.get(student.id) ?? [];
                 const studentAbsenceGroups = absenceGroupsByStudent.get(student.id) ?? [];
                 return (
@@ -543,7 +561,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
 
               <div className="parent-schedule-controls">
                 <div className="class-tabs">
-                  {parent.students.map((student) => {
+                  {linkedStudents.map((student) => {
                     const studentScheduleParams = new URLSearchParams({
                       view: "schedule",
                       studentId: student.id
@@ -698,7 +716,7 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
 
                 <div className="parent-schedule-controls">
                   <div className="class-tabs">
-                    {parent.students.map((student) => (
+                    {linkedStudents.map((student) => (
                       <Link
                         className={selectedStudent?.id === student.id ? "class-tab active" : "class-tab"}
                         href={`/parent?view=appointments&studentId=${student.id}&date=${selectedDate}`}

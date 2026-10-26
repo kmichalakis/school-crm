@@ -108,10 +108,8 @@ export default async function PrintAppointmentsPage({ searchParams }: PrintAppoi
                         <br />
                         <span>{appointment.student.class.name}</span>
                       </td>
-                      <td>
-                        {appointment.parent.surname} {appointment.parent.name}
-                        <br />
-                        <span>{appointment.parent.email}</span>
+                      <td style={{ overflowWrap: "anywhere" }}>
+                        {appointment.parent.email}
                       </td>
                       <td>
                         {appointmentStatusLabel(appointment.status)}

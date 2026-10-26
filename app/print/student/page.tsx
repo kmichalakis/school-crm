@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AbsenceStatus } from "@prisma/client";
 import { PrintButton } from "@/app/print/print-button";
 import { prisma } from "@/lib/prisma";
+import { studentParents } from "@/lib/family";
 import { absenceStatusLabel, hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
@@ -61,6 +62,7 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
     where: { id: params.studentId },
     include: {
       parent: true,
+      secondParent: true,
       class: {
         include: { schoolYear: true }
       },
@@ -137,8 +139,8 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
             <strong>{student.class.schoolYear.name}</strong>
           </div>
           <div>
-            <span>Γονέας/Κηδεμόνας</span>
-            <strong>{student.parent ? `${student.parent.surname} ${student.parent.name}` : "Δεν έχει συνδεθεί"}</strong>
+            <span>Email γονέα</span>
+            <strong style={{ overflowWrap: "anywhere" }}>{studentParents(student).map((parent) => parent.email).join(" / ") || "Δεν έχει συνδεθεί"}</strong>
           </div>
         </section>
 
@@ -156,8 +158,8 @@ export default async function PrintStudentPage({ searchParams }: PrintStudentPag
             <strong>{excusedCount}</strong>
           </div>
           <div className="panel metric">
-            <span>Email γονέα</span>
-            <strong>{student.parent?.email ?? "-"}</strong>
+            <span>Συνδεδεμένοι γονείς</span>
+            <strong>{studentParents(student).length}</strong>
           </div>
         </section>
 

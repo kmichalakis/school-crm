@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { studentParents } from "@/lib/family";
 import { emailTriggerLabel, hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { schoolHours } from "@/lib/school-time";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
@@ -92,12 +93,12 @@ export async function generateParentNotificationsAction() {
     where: {
       absent: true,
       status: { not: AbsenceStatus.REMOVED },
-      student: { parentId: { not: null } },
+      student: { OR: [{ parentId: { not: null } }, { secondParentId: { not: null } }] },
       sheet: allowedClassIds ? { classId: { in: allowedClassIds } } : undefined
     },
     include: {
       student: {
-        include: { parent: true }
+        include: { parent: true, secondParent: true }
       },
       sheet: {
         include: {
@@ -122,7 +123,8 @@ export async function generateParentNotificationsAction() {
 
   await prisma.$transaction(async (tx) => {
     for (const absence of absences) {
-      if (!absence.student.parent) {
+      const parents = studentParents(absence.student);
+      if (parents.length === 0) {
         continue;
       }
 
@@ -139,28 +141,30 @@ export async function generateParentNotificationsAction() {
         }
 
         const message = buildNotificationText(absence, rule.trigger);
-        await tx.parentNotification.upsert({
-          where: {
-            parentId_studentId_sheetId_type: {
-              parentId: absence.student.parent.id,
+        for (const parent of parents) {
+          await tx.parentNotification.upsert({
+            where: {
+              parentId_studentId_sheetId_type: {
+                parentId: parent.id,
+                studentId: absence.studentId,
+                sheetId: absence.sheetId,
+                type: rule.trigger
+              }
+            },
+            update: {
+              subject: message.subject,
+              body: message.body
+            },
+            create: {
+              parentId: parent.id,
               studentId: absence.studentId,
               sheetId: absence.sheetId,
-              type: rule.trigger
+              type: rule.trigger,
+              subject: message.subject,
+              body: message.body
             }
-          },
-          update: {
-            subject: message.subject,
-            body: message.body
-          },
-          create: {
-            parentId: absence.student.parent.id,
-            studentId: absence.studentId,
-            sheetId: absence.sheetId,
-            type: rule.trigger,
-            subject: message.subject,
-            body: message.body
-          }
-        });
+          });
+        }
       }
     }
   });

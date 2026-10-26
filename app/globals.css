@@ -499,6 +499,19 @@ button:disabled {
   white-space: nowrap;
 }
 
+.parent-children-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.parent-children-summary span {
+  color: var(--muted);
+}
+
 .brand {
   display: flex;
   align-items: center;

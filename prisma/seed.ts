@@ -140,13 +140,9 @@ async function main() {
   const parent = await prisma.parent.upsert({
     where: { userId: parentUser.id },
     update: {
-      name: "Δήμητρα",
-      surname: "Γεωργίου",
       email: "parent@example.edu"
     },
     create: {
-      name: "Δήμητρα",
-      surname: "Γεωργίου",
       email: "parent@example.edu",
       userId: parentUser.id
     }

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AbsenceStatus } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
 import { prisma } from "@/lib/prisma";
+import { studentParents } from "@/lib/family";
 import { absenceStatusLabel, hourLabel, weekDayLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
@@ -62,6 +63,7 @@ export default async function StudentsPage({ searchParams }: StudentsPageProps) 
         where: { classId: selectedClass.id },
         include: {
           parent: true,
+          secondParent: true,
           class: {
             include: { schoolYear: true }
           },
@@ -90,7 +92,7 @@ export default async function StudentsPage({ searchParams }: StudentsPageProps) 
     (sum, student) => sum + student.sheetAbsences.filter((absence) => absence.status === AbsenceStatus.MARKED).length,
     0
   );
-  const studentsWithParent = students.filter((student) => student.parent).length;
+  const studentsWithParent = students.filter((student) => student.parent || student.secondParent).length;
 
   return (
     <AppNavigation
@@ -183,8 +185,9 @@ export default async function StudentsPage({ searchParams }: StudentsPageProps) 
                 </div>
                 <span>{student.class.name}</span>
                 <span>
-                  {student.parent ? `${student.parent.surname} ${student.parent.name}` : "Δεν έχει συνδεθεί"}
-                  {student.parent?.email ? ` · ${student.parent.email}` : ""}
+                  {studentParents(student).length > 0
+                    ? studentParents(student).map((parent) => parent.email).join(" / ")
+                    : "Δεν έχει συνδεθεί"}
                 </span>
                 <div>
                   <strong>{student.sheetAbsences.length}</strong>

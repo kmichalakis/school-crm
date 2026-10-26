@@ -175,7 +175,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
             Μαθητής/τρια: {appointment.student.surname} {appointment.student.name} · {appointment.student.class.name}
           </span>
           <span>
-            Γονέας: {appointment.parent.surname} {appointment.parent.name} · {appointment.parent.email}
+            Γονέας: {appointment.parent.email}
           </span>
           {appointment.cancellationReason ? <span>{appointment.cancellationReason}</span> : null}
         </div>

@@ -49,7 +49,7 @@ export async function requestAbsenceJustificationAction(formData: FormData) {
       absent: true,
       status: AbsenceStatus.MARKED,
       student: {
-        parentId: parent.id
+        OR: [{ parentId: parent.id }, { secondParentId: parent.id }]
       }
     }
   });

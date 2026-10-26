@@ -198,7 +198,7 @@ export default async function NotificationsPage() {
                   <div>
                     <strong>{notification.subject}</strong>
                     <span>
-                      Προς: {notification.parent.email} · {notification.parent.surname} {notification.parent.name}
+                      Προς: {notification.parent.email}
                     </span>
                   </div>
                   <div>

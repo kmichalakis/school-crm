@@ -4,6 +4,7 @@ import { ClassYear, WeekDay } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
 import { ImportWorkbookForm } from "@/app/admin/import-workbook-form";
 import { prisma } from "@/lib/prisma";
+import { parentStudents } from "@/lib/family";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 import {
   createSchoolYearAction,
@@ -119,16 +120,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         class: {
           include: { schoolYear: true }
         },
-        parent: true
+        parent: true,
+        secondParent: true
       },
       orderBy: [{ class: { name: "asc" } }, { surname: "asc" }, { name: "asc" }]
     }),
     prisma.parent.findMany({
       include: {
         user: true,
-        students: true
+        students: true,
+        secondaryStudents: true
       },
-      orderBy: [{ surname: "asc" }, { name: "asc" }]
+      orderBy: { email: "asc" }
     }),
     prisma.course.findMany({
       include: {
@@ -446,14 +449,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       <section className="admin-section">
         <div className="admin-section-title">
           <h2>Γονείς</h2>
-          <p>Οι γονείς έχουν login με username ως κλειδί και συνδέονται με μαθητές μέσω email.</p>
+          <p>Κάθε γονέας συνδέεται με το δικό του email. Ένας μαθητής μπορεί να έχει έως δύο γονείς.</p>
         </div>
 
         <form action={upsertParentAction} className="admin-form grid-form">
-          <input name="name" placeholder="Όνομα" required />
-          <input name="surname" placeholder="Επώνυμο" required />
-          <input name="email" placeholder="email" type="email" required />
-          <input name="username" placeholder="username" required />
+          <input name="email" placeholder="Email σύνδεσης" type="email" required />
           <input name="password" placeholder="password" type="password" required />
           <label className="check-field">
             <input name="mustChangePassword" type="checkbox" defaultChecked />
@@ -469,16 +469,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             <form action={upsertParentAction} className="admin-row editable-row" key={parent.id}>
               <input name="id" type="hidden" value={parent.id} />
               <input name="userId" type="hidden" value={parent.userId} />
-              <input name="surname" defaultValue={parent.surname} required />
-              <input name="name" defaultValue={parent.name} required />
               <input name="email" defaultValue={parent.email} type="email" required />
-              <input name="username" defaultValue={parent.user.username} required />
               <input name="password" placeholder="νέος κωδικός" type="password" />
               <label className="check-field">
                 <input name="mustChangePassword" type="checkbox" defaultChecked={parent.user.mustChangePassword} />
                 Αλλαγή
               </label>
-              <span>{parent.students.length} μαθητές</span>
+              <span>{parentStudents(parent).length} μαθητές</span>
               <button className="secondary-button" type="submit">
                 Αποθήκευση
               </button>
@@ -510,14 +507,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </option>
             ))}
           </select>
-          <select name="parentId" defaultValue="">
-            <option value="">Χωρίς γονέα</option>
-            {parents.map((parent) => (
-              <option key={parent.id} value={parent.id}>
-                {parent.surname} {parent.name}
-              </option>
-            ))}
-          </select>
+          <label className="field">
+            Γονέας 1
+            <select name="parentId" defaultValue="" required>
+              <option value="">Επιλέξτε γονέα</option>
+              {parents.map((parent) => (
+                <option key={parent.id} value={parent.id}>{parent.email}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Γονέας 2
+            <select name="secondParentId" defaultValue="">
+              <option value="">Χωρίς δεύτερο γονέα</option>
+              {parents.map((parent) => (
+                <option key={parent.id} value={parent.id}>{parent.email}</option>
+              ))}
+            </select>
+          </label>
           <button className="primary-button" type="submit">
             Προσθήκη μαθητή
           </button>
@@ -538,14 +545,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </option>
                 ))}
               </select>
-              <select name="parentId" defaultValue={student.parentId ?? ""}>
-                <option value="">Χωρίς γονέα</option>
-                {parents.map((parent) => (
-                  <option key={parent.id} value={parent.id}>
-                    {parent.surname} {parent.name}
-                  </option>
-                ))}
-              </select>
+              <label className="field">
+                Γονέας 1
+                <select name="parentId" defaultValue={student.parentId ?? ""} required>
+                  <option value="">Επιλέξτε γονέα</option>
+                  {parents.map((parent) => (
+                    <option key={parent.id} value={parent.id}>{parent.email}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                Γονέας 2
+                <select name="secondParentId" defaultValue={student.secondParentId ?? ""}>
+                  <option value="">Χωρίς δεύτερο γονέα</option>
+                  {parents.map((parent) => (
+                    <option key={parent.id} value={parent.id}>{parent.email}</option>
+                  ))}
+                </select>
+              </label>
               <span>{student.class.schoolYear.name}</span>
               <button className="secondary-button" type="submit">
                 Αποθήκευση

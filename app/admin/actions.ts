@@ -218,10 +218,10 @@ export async function deleteSchoolYearDataAction(formData: FormData) {
 
     const students = await tx.student.findMany({
       where: { schoolYearId },
-      select: { id: true, parentId: true }
+      select: { id: true, parentId: true, secondParentId: true }
     });
     const studentIds = students.map((student) => student.id);
-    const affectedParentIds = Array.from(new Set(students.map((student) => student.parentId).filter((id): id is string => Boolean(id))));
+    const affectedParentIds = Array.from(new Set(students.flatMap((student) => [student.parentId, student.secondParentId]).filter((id): id is string => Boolean(id))));
 
     const courses = await tx.course.findMany({
       where: { classId: { in: classIds } },
@@ -321,6 +321,7 @@ export async function deleteSchoolYearDataAction(formData: FormData) {
       where: {
         id: { in: affectedParentIds },
         students: { none: {} },
+        secondaryStudents: { none: {} },
         notifications: { none: {} },
         justificationRequests: { none: {} },
         user: { role: UserRole.PARENT }
@@ -513,11 +514,9 @@ export async function upsertParentAction(formData: FormData) {
   await requireAdmin();
   const id = optionalText(formData, "id");
   const userId = optionalText(formData, "userId");
-  const username = requiredText(formData, "username", "username").toLowerCase();
   const password = optionalText(formData, "password");
-  const name = requiredText(formData, "name", "όνομα");
-  const surname = requiredText(formData, "surname", "επώνυμο");
-  const email = requiredText(formData, "email", "email");
+  const email = requiredText(formData, "email", "email").toLowerCase();
+  const username = email;
   const mustChangePassword = checked(formData, "mustChangePassword");
 
   if (!userId && !password) {
@@ -528,8 +527,17 @@ export async function upsertParentAction(formData: FormData) {
     validateAdminPassword(password, username);
   }
 
-  const user = userId
-    ? await prisma.user.update({
+  const [emailOwner, usernameOwner] = await Promise.all([
+    prisma.parent.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true } }),
+    prisma.user.findUnique({ where: { username }, select: { id: true } })
+  ]);
+  if ((emailOwner && emailOwner.id !== id) || (usernameOwner && usernameOwner.id !== userId)) {
+    finishAdminAction("Το email χρησιμοποιείται ήδη από άλλο λογαριασμό.", "error");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const user = userId
+      ? await tx.user.update({
         where: { id: userId },
         data: {
           username,
@@ -538,7 +546,7 @@ export async function upsertParentAction(formData: FormData) {
           ...(password ? { passwordHash: hashPassword(password) } : {})
         }
       })
-    : await prisma.user.create({
+      : await tx.user.create({
         data: {
           username,
           passwordHash: hashPassword(password ?? ""),
@@ -547,16 +555,17 @@ export async function upsertParentAction(formData: FormData) {
         }
       });
 
-  if (id) {
-    await prisma.parent.update({
-      where: { id },
-      data: { name, surname, email }
-    });
-  } else {
-    await prisma.parent.create({
-      data: { name, surname, email, userId: user.id }
-    });
-  }
+    if (id) {
+      await tx.parent.update({
+        where: { id },
+        data: { email }
+      });
+    } else {
+      await tx.parent.create({
+        data: { email, userId: user.id }
+      });
+    }
+  });
 
   revalidatePath("/admin");
 }
@@ -568,6 +577,14 @@ export async function upsertStudentAction(formData: FormData) {
   const classRecord = await prisma.class.findUniqueOrThrow({
     where: { id: classId }
   });
+  const parentId = requiredText(formData, "parentId", "πρώτο γονέα");
+  const secondParentId = optionalText(formData, "secondParentId");
+  if (secondParentId && !parentId) {
+    finishAdminAction("Επιλέξτε πρώτα τον πρώτο γονέα.", "error");
+  }
+  if (parentId && secondParentId === parentId) {
+    finishAdminAction("Επιλέξτε δύο διαφορετικούς γονείς.", "error");
+  }
   const data = {
     am: codeValue(requiredText(formData, "am", "ΑΜ μαθητή")),
     name: requiredText(formData, "name", "όνομα"),
@@ -575,7 +592,8 @@ export async function upsertStudentAction(formData: FormData) {
     patronymic: requiredText(formData, "patronymic", "πατρώνυμο"),
     classId,
     schoolYearId: classRecord.schoolYearId,
-    parentId: optionalText(formData, "parentId")
+    parentId,
+    secondParentId
   };
 
   if (id) {
@@ -711,17 +729,29 @@ export async function deleteParentAction(formData: FormData) {
   await requireAdmin();
   const id = requiredText(formData, "id", "γονέας");
   const userId = requiredText(formData, "userId", "χρήστης γονέα");
-  const [notificationCount, requestCount] = await Promise.all([
+  const [notificationCount, requestCount, appointmentCount] = await Promise.all([
     prisma.parentNotification.count({ where: { parentId: id } }),
-    prisma.parentJustificationRequest.count({ where: { parentId: id } })
+    prisma.parentJustificationRequest.count({ where: { parentId: id } }),
+    prisma.parentTeacherAppointment.count({ where: { parentId: id } })
   ]);
 
-  if (notificationCount > 0 || requestCount > 0) {
-    finishAdminAction("Ο γονέας έχει ιστορικό ενημερώσεων ή αιτημάτων και δεν διαγράφεται. Μπορείτε να αλλάξετε τα στοιχεία του.", "error");
+  if (notificationCount > 0 || requestCount > 0 || appointmentCount > 0) {
+    finishAdminAction("Ο γονέας έχει ιστορικό ενημερώσεων, αιτημάτων ή ραντεβού και δεν διαγράφεται. Μπορείτε να αλλάξετε τα στοιχεία του.", "error");
   }
 
   await prisma.$transaction(async (tx) => {
+    const studentsWithSecondParent = await tx.student.findMany({
+      where: { parentId: id, secondParentId: { not: null } },
+      select: { id: true, secondParentId: true }
+    });
+    for (const student of studentsWithSecondParent) {
+      await tx.student.update({
+        where: { id: student.id },
+        data: { parentId: student.secondParentId, secondParentId: null }
+      });
+    }
     await tx.student.updateMany({ where: { parentId: id }, data: { parentId: null } });
+    await tx.student.updateMany({ where: { secondParentId: id }, data: { secondParentId: null } });
     await tx.parent.delete({ where: { id } });
     await tx.user.delete({ where: { id: userId } });
   });
@@ -1068,6 +1098,12 @@ export async function importSchoolWorkbookAction(formData: FormData) {
         return user.parent.id;
       }
 
+      const parent = await tx.parent.findFirst({ where: { email: { equals: username, mode: "insensitive" } } });
+      if (parent) {
+        parentByUsername.set(username, parent.id);
+        return parent.id;
+      }
+
       return undefined;
     }
 
@@ -1119,45 +1155,42 @@ export async function importSchoolWorkbookAction(formData: FormData) {
     }
 
     for (const row of parentRows) {
-      const username = cell(row, ["username", "χρήστης", "login"]).toLowerCase();
-      const name = cell(row, ["όνομα", "name"]);
-      const surname = cell(row, ["επώνυμο", "surname"]);
-      const email = cell(row, ["email", "mail"]);
-      if (!username || !name || !surname || !email) {
+      const email = cell(row, ["email", "mail"]).toLowerCase();
+      const legacyUsername = cell(row, ["username", "χρήστης", "login"]).toLowerCase();
+      const username = email;
+      if (!email) {
         continue;
+      }
+
+      const parentWithEmail = await tx.parent.findFirst({
+        where: { email: { equals: email, mode: "insensitive" } },
+        include: { user: true }
+      });
+      const loginUser = await tx.user.findUnique({ where: { username }, include: { parent: true } });
+      if ((loginUser && loginUser.role !== UserRole.PARENT) || (loginUser && parentWithEmail && loginUser.id !== parentWithEmail.userId)) {
+        throw new Error(`Το email ${email} χρησιμοποιείται ήδη από άλλον λογαριασμό.`);
       }
 
       const password = cell(row, ["κωδικός", "password"]) || generatedImportPassword(parentsImported + 100);
       const passwordHash = importedPasswordHash(password);
-      const user = await tx.user.upsert({
-        where: { username },
-        update: {
-          role: UserRole.PARENT,
-          passwordHash,
-          mustChangePassword: true
-        },
-        create: {
-          username,
-          passwordHash,
-          role: UserRole.PARENT,
-          mustChangePassword: true
-        }
-      });
+      const user = parentWithEmail
+        ? await tx.user.update({
+            where: { id: parentWithEmail.userId },
+            data: { username, role: UserRole.PARENT, passwordHash, mustChangePassword: true }
+          })
+        : await tx.user.upsert({
+            where: { username },
+            update: { role: UserRole.PARENT, passwordHash, mustChangePassword: true },
+            create: { username, passwordHash, role: UserRole.PARENT, mustChangePassword: true }
+          });
       const parent = await tx.parent.upsert({
         where: { userId: user.id },
-        update: {
-          name,
-          surname,
-          email
-        },
-        create: {
-          name,
-          surname,
-          email,
-          userId: user.id
-        }
+        update: { email },
+        create: { email, userId: user.id }
       });
       parentByUsername.set(username, parent.id);
+      parentByUsername.set(email, parent.id);
+      if (legacyUsername) parentByUsername.set(legacyUsername, parent.id);
       parentsImported += 1;
     }
 
@@ -1233,8 +1266,16 @@ export async function importSchoolWorkbookAction(formData: FormData) {
         continue;
       }
 
-      const parentUsername = cell(row, ["γονέας", "parent", "parentUsername"]).toLowerCase();
+      const parentUsername = cell(row, ["γονέας 1 (email)", "γονέας 1", "γονέας", "parent", "parentUsername"]).toLowerCase();
+      const secondParentUsername = cell(row, ["γονέας 2 (email)", "γονέας 2", "secondParent", "secondParentUsername"]).toLowerCase();
       const parentId = await parentIdByUsername(parentUsername);
+      const secondParentId = await parentIdByUsername(secondParentUsername);
+      if (!parentId || (secondParentUsername && !secondParentId)) {
+        throw new Error(`Μαθητής ${am}: δεν βρέθηκε ένας από τους γονείς (${parentUsername}, ${secondParentUsername}).`);
+      }
+      if (secondParentId && (!parentId || secondParentId === parentId)) {
+        throw new Error(`Μαθητής ${am}: ο δεύτερος γονέας πρέπει να διαφέρει από τον πρώτο.`);
+      }
       await tx.student.upsert({
         where: {
           schoolYearId_am: {
@@ -1242,7 +1283,7 @@ export async function importSchoolWorkbookAction(formData: FormData) {
             am
           }
         },
-        update: { name, surname, patronymic, classId, parentId },
+        update: { name, surname, patronymic, classId, parentId, secondParentId },
         create: {
           am,
           name,
@@ -1250,7 +1291,8 @@ export async function importSchoolWorkbookAction(formData: FormData) {
           patronymic,
           classId,
           schoolYearId: schoolYear.id,
-          parentId
+          parentId,
+          secondParentId
         }
       });
       studentsImported += 1;
@@ -1494,6 +1536,7 @@ export async function promoteSchoolYearAction(formData: FormData) {
             surname: student.surname,
             patronymic: student.patronymic,
             parentId: student.parentId,
+            secondParentId: student.secondParentId,
             classId: targetClass.id,
             schoolYearId: nextYear.id
           }

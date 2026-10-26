@@ -7,6 +7,7 @@ import { sendSystemEmail } from "@/lib/email";
 import { dateInputValue, isAllowedSchoolDate, isWeekdayDate, isWithinSchoolYear } from "@/lib/school-calendar";
 import { formatDateInput, dateToWeekDay } from "@/lib/school-time";
 import { prisma } from "@/lib/prisma";
+import { studentParents } from "@/lib/family";
 import { hourLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 import { cookies } from "next/headers";
@@ -93,14 +94,14 @@ async function notifyParentsForScheduleChanges(classId: string, className: strin
   }
 
   const students = await prisma.student.findMany({
-    where: { classId, parent: { email: { not: "" } } },
-    include: { parent: true }
+    where: { classId },
+    include: { parent: true, secondParent: true }
   });
   const recipients = Array.from(
     new Map(
       students
-        .map((student) => student.parent)
-        .filter((parent): parent is NonNullable<(typeof students)[number]["parent"]> => Boolean(parent?.email))
+        .flatMap(studentParents)
+        .filter((parent) => Boolean(parent.email.trim()))
         .map((parent) => [parent.email.trim().toLowerCase(), parent.email.trim()])
     ).values()
   );
