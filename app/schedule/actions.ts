@@ -295,6 +295,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
   await requireAdmin();
   const classId = text(formData, "classId");
   const date = text(formData, "date");
+  const notifyScreenManagerOnly = formData.get("notifyScreenManagerOnly") === "on";
   const day = dateToWeekDay(date) as WeekDay | null;
 
   if (!classId || !date || !day) {
@@ -506,6 +507,13 @@ export async function saveDailyScheduleAction(formData: FormData) {
     }
   }
 
+  if (notifyScreenManagerOnly && scheduleChangeDescriptions.length > 0) {
+    const setting = await prisma.schoolSetting.findUnique({ where: { id: "school" } });
+    if (!setting?.screenManagerEmail?.trim()) {
+      finishScheduleAction(classId, date, "Ορίστε πρώτα email διαχειριστή οθόνης στη Διαχείριση σχολείου.", "error");
+    }
+  }
+
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
@@ -578,7 +586,9 @@ export async function saveDailyScheduleAction(formData: FormData) {
   });
 
   const [emailResult, screenManagerEmailStatus] = await Promise.all([
-    notifyParentsForScheduleChanges(classId, classRecord.name, date, scheduleChangeDescriptions, isWeeklySchedule),
+    notifyScreenManagerOnly
+      ? Promise.resolve({ sent: 0, total: 0, failed: 0 })
+      : notifyParentsForScheduleChanges(classId, classRecord.name, date, scheduleChangeDescriptions, isWeeklySchedule),
     notifyScreenManagerForScheduleChanges(classRecord.name, date, scheduleChangeDescriptions, isWeeklySchedule)
   ]);
 
@@ -595,7 +605,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
   finishScheduleAction(
     classId,
     date,
-    `Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Email γονέων: ${emailResult.sent}/${emailResult.total}${emailResult.failed > 0 ? `, αποτυχίες: ${emailResult.failed}` : ""}. Διαχειριστής οθόνης: ${screenManagerEmailStatus === "sent" ? "το email στάλθηκε" : screenManagerEmailStatus === "failed" ? "αποτυχία αποστολής email" : "δεν έχει οριστεί email"}.`,
+    `Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Email γονέων: ${notifyScreenManagerOnly ? "δεν στάλθηκαν (κατ' επιλογή)" : `${emailResult.sent}/${emailResult.total}${emailResult.failed > 0 ? `, αποτυχίες: ${emailResult.failed}` : ""}`}. Διαχειριστής οθόνης: ${screenManagerEmailStatus === "sent" ? "το email στάλθηκε" : screenManagerEmailStatus === "failed" ? "αποτυχία αποστολής email" : "δεν έχει οριστεί email"}.`,
     emailResult.failed > 0 || screenManagerEmailStatus === "failed" ? "error" : "success"
   );
 }

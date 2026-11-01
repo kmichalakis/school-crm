@@ -920,6 +920,15 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.schedule-notification-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.schedule-notification-actions .check-field {
+  margin-right: auto;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

@@ -472,7 +472,11 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                       </div>
                     );
                   })}
-                  <div className="teacher-actions">
+                  <div className="teacher-actions schedule-notification-actions">
+                    <label className="check-field">
+                      <input name="notifyScreenManagerOnly" type="checkbox" />
+                      Αποστολή μόνο στον διαχειριστή οθόνης, όχι στους γονείς
+                    </label>
                     <button className="primary-button" type="submit">
                       Αποθήκευση ημερήσιου προγράμματος
                     </button>
