@@ -431,21 +431,9 @@ export async function saveDailyScheduleAction(formData: FormData) {
     }
   });
 
-  for (const sheet of existingSheets) {
-    const hasAttendanceData =
-      sheet.absences.length > 0 || Boolean(sheet.signedAt) || sheet.courses.some((course) => Boolean(course.signedAt));
-    if (hasAttendanceData) {
-      finishScheduleAction(
-        classId,
-        date,
-        "Δεν μπορεί να αλλάξει πρόγραμμα σε ώρα που έχει ήδη απουσίες ή υπογραφή.",
-        "error"
-      );
-    }
-  }
-
   const scheduleChangeDescriptions: string[] = [];
   const existingSheetsByHour = new Map(existingSheets.map((sheet) => [sheet.hour, sheet]));
+  const hoursToUpdate: number[] = [];
   let isWeeklySchedule = true;
 
   for (let hour = 1; hour <= 7; hour += 1) {
@@ -485,25 +473,41 @@ export async function saveDailyScheduleAction(formData: FormData) {
                 courseId: entry.courseId,
                 courseName: entry.course.name,
                 isNoCourse: entry.course.isNoCourse,
-                teacherId: entry.teacherId,
+                teacherId: entry.teacherId ?? courseById.get(entry.courseId)?.teachers[0]?.teacher.id ?? null,
                 teacherName: ""
               }))
             : [{
                 courseId: previousSheet.courseId,
                 courseName: previousSheet.course.name,
                 isNoCourse: previousSheet.course.isNoCourse,
-                teacherId: null,
+                teacherId: courseById.get(previousSheet.courseId)?.teachers[0]?.teacher.id ?? null,
                 teacherName: ""
               }]
         )
       : weeklySignature;
 
     if (selectedSignature !== previousSignature) {
+      const hasAttendanceData = previousSheet && (
+        previousSheet.absences.length > 0 ||
+        (Boolean(previousSheet.signedAt) && !previousSheet.course.isNoCourse) ||
+        previousSheet.courses.some((entry) => Boolean(entry.signedAt) && !entry.course.isNoCourse)
+      );
+      if (hasAttendanceData) {
+        finishScheduleAction(classId, date, `Δεν μπορεί να αλλάξει η ${hourLabel(hour)}: υπάρχουν ήδη απουσίες ή υπογραφή.`, "error");
+      }
+      hoursToUpdate.push(hour);
+    }
+
+    if (selectedSignature !== weeklySignature || selectedSignature !== previousSignature) {
       scheduleChangeDescriptions.push(describeScheduleChange(hour, selectedEntries));
     }
   }
 
-  if (notifyScreenManagerOnly && scheduleChangeDescriptions.length > 0) {
+  if (hoursToUpdate.length === 0) {
+    finishScheduleAction(classId, date, "Δεν εντοπίστηκαν νέες αλλαγές στο ημερήσιο πρόγραμμα.");
+  }
+
+  if (notifyScreenManagerOnly) {
     const setting = await prisma.schoolSetting.findUnique({ where: { id: "school" } });
     if (!setting?.screenManagerEmail?.trim()) {
       finishScheduleAction(classId, date, "Ορίστε πρώτα email διαχειριστή οθόνης στη Διαχείριση σχολείου.", "error");
@@ -513,7 +517,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
-    for (let hour = 1; hour <= 7; hour += 1) {
+    for (const hour of hoursToUpdate) {
       const selectedCourseIds = selectedCourseIdsByHour.get(hour) ?? [];
       const effectiveCourseIds = selectedCourseIds.length > 0 ? selectedCourseIds : [noCourse.id];
       const selectedCourses = effectiveCourseIds.map((courseId) => courseById.get(courseId) ?? noCourse);
@@ -591,10 +595,6 @@ export async function saveDailyScheduleAction(formData: FormData) {
   revalidatePath("/teacher");
   revalidatePath("/pending");
   revalidatePath("/parent");
-
-  if (scheduleChangeDescriptions.length === 0) {
-    finishScheduleAction(classId, date, "Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Δεν εντοπίστηκαν νέες αλλαγές.");
-  }
 
   finishScheduleAction(
     classId,
