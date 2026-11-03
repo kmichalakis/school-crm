@@ -555,8 +555,8 @@ export async function PUT(request: NextRequest) {
     for (const courseId of selectedCourseIds) {
       const course = courseById.get(courseId);
       const requestedEntry = requestedEntryByCourseId.get(courseId);
-      if (course?.isSubstitution && (!requestedEntry?.teacherId || !substitutionTeacherById.has(requestedEntry.teacherId))) {
-        return NextResponse.json({ error: "Στην ΑΝΑΠΛΗΡΩΣΗ πρέπει να οριστεί εκπαιδευτικός." }, { status: 400 });
+      if (course?.isSubstitution && requestedEntry?.teacherId && !substitutionTeacherById.has(requestedEntry.teacherId)) {
+        return NextResponse.json({ error: "Ο εκπαιδευτικός αναπλήρωσης δεν βρέθηκε." }, { status: 400 });
       }
     }
     const selectedEntries = selectedCourseIds.map((courseId, position) => {
@@ -705,6 +705,8 @@ export async function PUT(request: NextRequest) {
         const signedAt =
           entry.course.isNoCourse
             ? now
+            : !entry.teacher
+            ? null
             : body.action === "unlock" && unlockedCourseIds.has(entry.course.id)
             ? null
             : signatureByCourseId.get(entry.course.id) ??

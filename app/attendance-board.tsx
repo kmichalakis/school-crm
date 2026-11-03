@@ -295,8 +295,9 @@ export function AttendanceBoard({
   const canEdit = isSheetLoaded && (!isSigned || isTeacher);
   const isFutureAttendanceDate = selectedDate > formatDateInput(new Date());
   const hasUnsignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && !entry.signedAt);
+  const hasUnsignedCourseWithTeacher = currentCourseEntries.some((entry) => entry.teacherId && !entry.signedAt);
   const hasSignedCourseForCurrentTeacher = currentCourseEntries.some((entry) => entry.teacherId === currentTeacherId && entry.signedAt);
-  const canSign = isSheetLoaded && (isClassTablet || hasUnsignedCourseForCurrentTeacher) && !isSigned && !isSyncing && !isFutureAttendanceDate;
+  const canSign = isSheetLoaded && (isClassTablet ? hasUnsignedCourseWithTeacher : hasUnsignedCourseForCurrentTeacher) && !isSigned && !isSyncing && !isFutureAttendanceDate;
   const canUnlock = isSheetLoaded && (isClassTablet || hasSignedCourseForCurrentTeacher) && isSigned && !isSyncing;
   const signedAtDate = currentSheet.signedAt ? new Date(currentSheet.signedAt) : null;
   const savedAtDate = currentSheet.savedAt ? new Date(currentSheet.savedAt) : null;
@@ -1064,6 +1065,8 @@ export function AttendanceBoard({
                     <span className="sync-pill ready">Υπογεγραμμένο</span>
                   ) : signatureAction === "unlock" && !entry.signedAt ? (
                     <span className="sync-pill">Δεν έχει υπογραφεί</span>
+                  ) : entry.isSubstitution && !entry.teacherId ? (
+                    <span className="sync-pill">Χωρίς εκπαιδευτικό</span>
                   ) : (
                     <input
                       aria-label={`Κωδικός εκπαιδευτικού ${entry.teacherName}`}
@@ -1100,7 +1103,7 @@ export function AttendanceBoard({
                   isSyncing ||
                   !currentCourseEntries.some((entry) => {
                     const canSubmitEntry = signatureAction === "unlock" ? Boolean(entry.signedAt) : !entry.signedAt;
-                    return canSubmitEntry && (signaturePasswords[entry.courseId]?.length ?? 0) >= 4;
+                    return canSubmitEntry && Boolean(entry.teacherId) && (signaturePasswords[entry.courseId]?.length ?? 0) >= 4;
                   })
                 }
                 type="submit"

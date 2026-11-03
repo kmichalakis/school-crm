@@ -460,10 +460,6 @@ export async function saveDailyScheduleAction(formData: FormData) {
           : null
         : (course.teachers[0]?.teacher ?? null);
 
-      if (course.isSubstitution && !selectedTeacherId) {
-        finishScheduleAction(classId, date, "Στην ΑΝΑΠΛΗΡΩΣΗ πρέπει να οριστεί εκπαιδευτικός.", "error");
-      }
-
       if (course.isSubstitution && selectedTeacherId && !teacher) {
         finishScheduleAction(classId, date, "Ο εκπαιδευτικός αναπλήρωσης δεν βρέθηκε.", "error");
       }
@@ -526,9 +522,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
         selectedCourses.map(async (course, position) => {
           const selectedTeacherId = selectedTeacherIdsByHourPosition.get(`${hour}-${position}`);
           if (course.isSubstitution) {
-            if (!selectedTeacherId) {
-              finishScheduleAction(classId, date, "Στην ΑΝΑΠΛΗΡΩΣΗ πρέπει να οριστεί εκπαιδευτικός.", "error");
-            }
+            if (!selectedTeacherId) return null;
 
             const teacher = await tx.teacher.findUnique({ where: { id: selectedTeacherId } });
             if (!teacher) {
@@ -541,7 +535,7 @@ export async function saveDailyScheduleAction(formData: FormData) {
         })
       );
       const teacherNames = Array.from(
-        new Set(selectedCourseTeachers.filter(Boolean).map((teacher) => `${teacher.name} ${teacher.surname}`))
+        new Set(selectedCourseTeachers.flatMap((teacher) => teacher ? [`${teacher.name} ${teacher.surname}`] : []))
       );
       const sheet = await tx.attendanceSheet.upsert({
         where: {

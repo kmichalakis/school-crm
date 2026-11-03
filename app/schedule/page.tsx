@@ -429,7 +429,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-teacher-0`}
                             name={`hour-${schoolHour.hour}-teacher-0`}
                           >
-                            <option value="">Μόνο για αναπλήρωση</option>
+                            <option value="">Χωρίς εκπαιδευτικό</option>
                             {teachers.map((teacher) => (
                               <option key={teacher.id} value={teacher.id}>
                                 {teacher.surname} {teacher.name}
@@ -461,7 +461,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
                             key={`${selectedClass.id}-${selectedDate}-${schoolHour.hour}-teacher-1`}
                             name={`hour-${schoolHour.hour}-teacher-1`}
                           >
-                            <option value="">Μόνο για αναπλήρωση</option>
+                            <option value="">Χωρίς εκπαιδευτικό</option>
                             {teachers.map((teacher) => (
                               <option key={teacher.id} value={teacher.id}>
                                 {teacher.surname} {teacher.name}
