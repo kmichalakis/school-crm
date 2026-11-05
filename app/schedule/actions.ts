@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { WeekDay } from "@prisma/client";
-import { sendSystemEmail } from "@/lib/email";
+import { sendSystemEmail, type EmailSendResult } from "@/lib/email";
 import { dateInputValue, isAllowedSchoolDate, isWeekdayDate, isWithinSchoolYear } from "@/lib/school-calendar";
 import { formatDateInput, dateToWeekDay } from "@/lib/school-time";
 import { prisma } from "@/lib/prisma";
@@ -90,7 +90,7 @@ function describeScheduleChange(hour: number, entries: ScheduleChangeEntry[]) {
 
 async function notifyParentsForScheduleChanges(classId: string, className: string, date: string, changes: string[], isWeeklySchedule: boolean) {
   if (changes.length === 0) {
-    return { failed: 0, sent: 0, total: 0 };
+    return { failed: 0, sent: 0, total: 0, unsent: 0, failureKind: undefined as EmailSendResult["failureKind"] };
   }
 
   const students = await prisma.student.findMany({
@@ -108,6 +108,7 @@ async function notifyParentsForScheduleChanges(classId: string, className: strin
 
   let sent = 0;
   let failed = 0;
+  let failureKind: EmailSendResult["failureKind"];
   const subject = `Αλλαγή προγράμματος ${className} - ${dateLabel(date)}`;
   const body = [
     "Αγαπητέ/ή γονέα/κηδεμόνα,",
@@ -130,18 +131,30 @@ async function notifyParentsForScheduleChanges(classId: string, className: strin
       sent += 1;
     } else {
       failed += 1;
+      failureKind = result.failureKind ?? failureKind;
+      if (result.failureKind && !["recipient", "other"].includes(result.failureKind)) break;
     }
   }
 
-  return { failed, sent, total: recipients.length };
+  return { failed, sent, total: recipients.length, unsent: recipients.length - sent - failed, failureKind };
+}
+
+function emailFailureNotice(kind: EmailSendResult["failureKind"]) {
+  switch (kind) {
+    case "quota": return "Ο πάροχος email περιόρισε προσωρινά τις αποστολές. Δοκιμάστε αργότερα.";
+    case "authentication": return "Αποτυχία σύνδεσης στο email αποστολέα. Ελέγξτε τις ρυθμίσεις του.";
+    case "connection": return "Πρόβλημα σύνδεσης με τον πάροχο email.";
+    case "configuration": return "Λείπουν οι ρυθμίσεις αποστολής email.";
+    default: return "";
+  }
 }
 
 async function notifyScreenManagerForScheduleChanges(className: string, date: string, changes: string[], isWeeklySchedule: boolean) {
-  if (changes.length === 0) return "disabled" as const;
+  if (changes.length === 0) return { status: "disabled" as const, failureKind: undefined as EmailSendResult["failureKind"] };
 
   const setting = await prisma.schoolSetting.findUnique({ where: { id: "school" } });
   const email = setting?.screenManagerEmail?.trim();
-  if (!email) return "disabled" as const;
+  if (!email) return { status: "disabled" as const, failureKind: undefined as EmailSendResult["failureKind"] };
 
   const subject = `Αλλαγή προγράμματος ${className} - ${dateLabel(date)}`;
   const body = [
@@ -154,7 +167,7 @@ async function notifyScreenManagerForScheduleChanges(className: string, date: st
     "Το πλήρες πρόγραμμα είναι διαθέσιμο στην πλατφόρμα."
   ].join("\n");
   const result = await sendSystemEmail(email, subject, body);
-  return result.sent ? "sent" as const : "failed" as const;
+  return { status: result.sent ? "sent" as const : "failed" as const, failureKind: result.failureKind };
 }
 
 async function nextNoCourseAa(classId: string) {
@@ -583,9 +596,9 @@ export async function saveDailyScheduleAction(formData: FormData) {
     }
   });
 
-  const [emailResult, screenManagerEmailStatus] = await Promise.all([
+  const [emailResult, screenManagerEmailResult] = await Promise.all([
     notifyScreenManagerOnly
-      ? Promise.resolve({ sent: 0, total: 0, failed: 0 })
+      ? Promise.resolve({ sent: 0, total: 0, failed: 0, unsent: 0, failureKind: undefined as EmailSendResult["failureKind"] })
       : notifyParentsForScheduleChanges(classId, classRecord.name, date, scheduleChangeDescriptions, isWeeklySchedule),
     notifyScreenManagerForScheduleChanges(classRecord.name, date, scheduleChangeDescriptions, isWeeklySchedule)
   ]);
@@ -599,8 +612,8 @@ export async function saveDailyScheduleAction(formData: FormData) {
   finishScheduleAction(
     classId,
     date,
-    `Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Email γονέων: ${notifyScreenManagerOnly ? "δεν στάλθηκαν (κατ' επιλογή)" : `${emailResult.sent}/${emailResult.total}${emailResult.failed > 0 ? `, αποτυχίες: ${emailResult.failed}` : ""}`}. Διαχειριστής οθόνης: ${screenManagerEmailStatus === "sent" ? "το email στάλθηκε" : screenManagerEmailStatus === "failed" ? "αποτυχία αποστολής email" : "δεν έχει οριστεί email"}.`,
-    emailResult.failed > 0 || screenManagerEmailStatus === "failed" ? "error" : "success"
+    `Το ημερήσιο πρόγραμμα αποθηκεύτηκε. Email γονέων: ${notifyScreenManagerOnly ? "δεν στάλθηκαν (κατ' επιλογή)" : `${emailResult.sent}/${emailResult.total}${emailResult.failed > 0 ? `, αποτυχίες: ${emailResult.failed}` : ""}${emailResult.unsent > 0 ? `, δεν επιχειρήθηκαν: ${emailResult.unsent}` : ""}`}. Διαχειριστής οθόνης: ${screenManagerEmailResult.status === "sent" ? "το email στάλθηκε" : screenManagerEmailResult.status === "failed" ? "αποτυχία αποστολής email" : "δεν έχει οριστεί email"}.${emailResult.failed > 0 || screenManagerEmailResult.status === "failed" ? ` ${emailFailureNotice(emailResult.failureKind ?? screenManagerEmailResult.failureKind)}` : ""}`,
+    emailResult.failed > 0 || screenManagerEmailResult.status === "failed" ? "error" : "success"
   );
 }
 
