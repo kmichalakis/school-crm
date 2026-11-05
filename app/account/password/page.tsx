@@ -9,6 +9,7 @@ import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
 type PasswordPageProps = {
   searchParams: Promise<{
+    edit?: string;
     notice?: string;
     noticeType?: string;
   }>;
@@ -29,13 +30,15 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
     ? await prisma.passwordChangeRequest.findUnique({ where: { userId: session.userId } })
     : null;
   const canConfirm = pendingRequest && pendingRequest.expiresAt > new Date() && pendingRequest.attempts < 5;
+  const isEditing = isParent && canConfirm && params.edit === "1";
+  const showConfirmation = isParent && canConfirm && !isEditing;
 
   return (
     <main className="admin-shell">
       <header className="admin-topbar">
         <SchoolBrand
           title="Αλλαγή κωδικού"
-          subtitle={session.mustChangePassword ? "Απαιτείται νέος κωδικός" : "Ασφάλεια λογαριασμού"}
+          subtitle={showConfirmation ? "Επιβεβαίωση μέσω email" : session.mustChangePassword ? "Απαιτείται νέος κωδικός" : "Ασφάλεια λογαριασμού"}
         />
         <div className="status-row">
           {!session.mustChangePassword ? (
@@ -55,31 +58,35 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
 
       <section className="admin-section">
         <div className="admin-section-title">
-          <h2>{isParent ? "Αλλαγή κωδικού γονέα" : "Νέος κωδικός"}</h2>
+          <h2>{showConfirmation ? "Κωδικός επιβεβαίωσης" : isParent ? "Αλλαγή κωδικού γονέα" : "Νέος κωδικός"}</h2>
           <p>
-            {isParent
+            {showConfirmation
+              ? "Πληκτρολογήστε τον εξαψήφιο κωδικό που στάλθηκε στο email σας."
+              : isParent
               ? "Πληκτρολογήστε τον τρέχοντα και τον νέο κωδικό. Θα στείλουμε κωδικό επιβεβαίωσης στο email σας."
               : "Ο κωδικός μπορεί να είναι σύντομος ή αριθμητικό PIN, αρκεί να μην περιέχει το username."}
           </p>
         </div>
-        <form action={isParent ? requestParentPasswordChangeAction : changePasswordAction} className="admin-form compact-form password-form">
-          <div className="field">
-            <label htmlFor="currentPassword">Τρέχων κωδικός</label>
-            <input id="currentPassword" name="currentPassword" type="password" autoComplete="current-password" required />
-          </div>
-          <div className="field">
-            <label htmlFor="newPassword">Νέος κωδικός</label>
-            <input id="newPassword" name="newPassword" type="password" autoComplete="new-password" required />
-          </div>
-          <div className="field">
-            <label htmlFor="confirmPassword">Επιβεβαίωση νέου κωδικού</label>
-            <input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" required />
-          </div>
-          <button className="primary-button" type="submit">
-            {isParent ? "Αποστολή κωδικού επιβεβαίωσης" : "Αλλαγή κωδικού"}
-          </button>
-        </form>
-        {isParent && canConfirm ? (
+        {!showConfirmation ? (
+          <form action={isParent ? requestParentPasswordChangeAction : changePasswordAction} className="admin-form compact-form password-form">
+            <div className="field">
+              <label htmlFor="currentPassword">Τρέχων κωδικός</label>
+              <input id="currentPassword" name="currentPassword" type="password" autoComplete="current-password" required />
+            </div>
+            <div className="field">
+              <label htmlFor="newPassword">Νέος κωδικός</label>
+              <input id="newPassword" name="newPassword" type="password" autoComplete="new-password" required />
+            </div>
+            <div className="field">
+              <label htmlFor="confirmPassword">Επιβεβαίωση νέου κωδικού</label>
+              <input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" required />
+            </div>
+            <button className="primary-button" type="submit">
+              {isParent ? "Αποστολή κωδικού επιβεβαίωσης" : "Αλλαγή κωδικού"}
+            </button>
+          </form>
+        ) : null}
+        {showConfirmation ? (
           <form action={confirmParentPasswordChangeAction} className="admin-form compact-form password-form">
             <div className="field">
               <label htmlFor="verificationCode">Κωδικός επιβεβαίωσης από το email</label>
@@ -96,6 +103,16 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
             </div>
             <button className="primary-button" type="submit">Επιβεβαίωση αλλαγής</button>
           </form>
+        ) : null}
+        {showConfirmation ? (
+          <div className="section-actions">
+            <Link className="secondary-button" href="/account/password?edit=1">Αλλαγή στοιχείων</Link>
+          </div>
+        ) : null}
+        {isEditing ? (
+          <div className="section-actions">
+            <Link className="secondary-button" href="/account/password">Επιστροφή στην επιβεβαίωση</Link>
+          </div>
         ) : null}
       </section>
     </main>

@@ -153,7 +153,8 @@ export async function confirmParentPasswordChangeAction(formData: FormData) {
   });
 
   revalidatePath("/");
-  redirect(passwordPath("Ο κωδικός άλλαξε επιτυχώς."));
+  const params = new URLSearchParams({ notice: "Ο κωδικός άλλαξε επιτυχώς." });
+  redirect(`/parent?${params.toString()}`);
 }
 
 export async function changePasswordAction(formData: FormData) {
