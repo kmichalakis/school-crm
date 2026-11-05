@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { changePasswordAction } from "@/app/account/actions";
+import { changePasswordAction, confirmParentPasswordChangeAction, requestParentPasswordChangeAction } from "@/app/account/actions";
 import { LogoutButton } from "@/app/logout-button";
 import { SchoolBrand } from "@/app/school-brand";
+import { prisma } from "@/lib/prisma";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
 
 type PasswordPageProps = {
@@ -23,13 +24,18 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
 
   const params = await searchParams;
   const noticeType = params.noticeType === "error" ? "error" : "success";
+  const isParent = session.role === "PARENT";
+  const pendingRequest = isParent
+    ? await prisma.passwordChangeRequest.findUnique({ where: { userId: session.userId } })
+    : null;
+  const canConfirm = pendingRequest && pendingRequest.expiresAt > new Date() && pendingRequest.attempts < 5;
 
   return (
     <main className="admin-shell">
       <header className="admin-topbar">
         <SchoolBrand
           title="Αλλαγή κωδικού"
-          subtitle={session.mustChangePassword ? "Απαιτείται νέος ασφαλής κωδικός" : "Ασφάλεια λογαριασμού"}
+          subtitle={session.mustChangePassword ? "Απαιτείται νέος κωδικός" : "Ασφάλεια λογαριασμού"}
         />
         <div className="status-row">
           {!session.mustChangePassword ? (
@@ -49,10 +55,14 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
 
       <section className="admin-section">
         <div className="admin-section-title">
-          <h2>Νέος κωδικός</h2>
-          <p>Ο κωδικός μπορεί να είναι σύντομος ή αριθμητικό PIN, αρκεί να μην περιέχει το username.</p>
+          <h2>{isParent ? "Αλλαγή κωδικού γονέα" : "Νέος κωδικός"}</h2>
+          <p>
+            {isParent
+              ? "Πληκτρολογήστε τον τρέχοντα και τον νέο κωδικό. Θα στείλουμε κωδικό επιβεβαίωσης στο email σας."
+              : "Ο κωδικός μπορεί να είναι σύντομος ή αριθμητικό PIN, αρκεί να μην περιέχει το username."}
+          </p>
         </div>
-        <form action={changePasswordAction} className="admin-form compact-form password-form">
+        <form action={isParent ? requestParentPasswordChangeAction : changePasswordAction} className="admin-form compact-form password-form">
           <div className="field">
             <label htmlFor="currentPassword">Τρέχων κωδικός</label>
             <input id="currentPassword" name="currentPassword" type="password" autoComplete="current-password" required />
@@ -66,9 +76,27 @@ export default async function PasswordPage({ searchParams }: PasswordPageProps) 
             <input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" required />
           </div>
           <button className="primary-button" type="submit">
-            Αλλαγή κωδικού
+            {isParent ? "Αποστολή κωδικού επιβεβαίωσης" : "Αλλαγή κωδικού"}
           </button>
         </form>
+        {isParent && canConfirm ? (
+          <form action={confirmParentPasswordChangeAction} className="admin-form compact-form password-form">
+            <div className="field">
+              <label htmlFor="verificationCode">Κωδικός επιβεβαίωσης από το email</label>
+              <input
+                id="verificationCode"
+                name="verificationCode"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                autoComplete="one-time-code"
+                required
+              />
+            </div>
+            <button className="primary-button" type="submit">Επιβεβαίωση αλλαγής</button>
+          </form>
+        ) : null}
       </section>
     </main>
   );

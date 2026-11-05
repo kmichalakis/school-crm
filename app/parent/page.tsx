@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AbsenceStatus, AppointmentStatus, type WeekDay } from "@prisma/client";
-import { CalendarClock, FileDown, ShieldCheck, Users } from "lucide-react";
+import { CalendarClock, FileDown, KeyRound, ShieldCheck, Users } from "lucide-react";
 import { LogoutButton } from "@/app/logout-button";
 import { ParentAppointmentBookingForm } from "@/app/parent/parent-appointment-booking-form";
 import { ParentAppointmentDatePicker } from "@/app/parent/parent-appointment-date-picker";
@@ -413,6 +413,10 @@ export default async function ParentPage({ searchParams }: ParentPageProps) {
           {parent.email}
         </div>
         <div className="parent-header-actions">
+          <Link className="secondary-button" href="/account/password">
+            <KeyRound size={17} />
+            Αλλαγή κωδικού
+          </Link>
           <a className="secondary-button" href="/odigies-xrisis-gonea.pdf" download="Οδηγίες χρήσης γονέα.pdf">
             <FileDown size={17} />
             Οδηγίες Χρήσης

@@ -80,6 +80,8 @@
 
 6. Μετά το deploy, μπες με τον admin χρήστη και κάνε import το Excel από τη σελίδα διαχείρισης.
 
+Αν χρησιμοποιείς Prisma Postgres στο Vercel, κράτησε το direct connection string στο `DATABASE_URL` για migrations. Η εφαρμογή χρησιμοποιεί το `DATABASE_URL_POOLED` που παρέχει η ενσωμάτωση Prisma ή, αν το ορίσεις χειροκίνητα, το `DATABASE_POOL_URL` με το pooled connection string (`pooled.db.prisma.io`). Η μεταβλητή πρέπει να ισχύει στο Production και απαιτεί redeploy. Μην αντικαταστήσεις τη βάση ή τα δεδομένα της.
+
 Για πραγματικά δεδομένα μαθητών/γονέων, χρησιμοποίησε το online περιβάλλον μόνο με κλειστή πρόσβαση και ισχυρό admin κωδικό.
 
 ## Επόμενα βήματα

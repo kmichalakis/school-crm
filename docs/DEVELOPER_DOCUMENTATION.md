@@ -118,6 +118,8 @@ npm run db:seed
 
 ```text
 DATABASE_URL=postgresql://...
+DATABASE_URL_POOLED=postgresql://...@pooled.db.prisma.io:5432/postgres?sslmode=require (από την ενσωμάτωση Prisma)
+DATABASE_POOL_URL=postgresql://...@pooled.db.prisma.io:5432/postgres?sslmode=require (προαιρετικό)
 NEXTAUTH_SECRET=τυχαίο-μεγάλο-secret
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ισχυρός-αρχικός-κωδικός
@@ -131,7 +133,8 @@ RESEND_API_KEY=προαιρετικό-api-key-για-εναλλακτική-απ
 
 Σημαντικά:
 
-- Το `DATABASE_URL` χρησιμοποιείται από Prisma.
+- Το `DATABASE_URL` χρησιμοποιείται από το Prisma CLI για migrations και ως προεπιλογή στο runtime.
+- Ο Prisma Client χρησιμοποιεί το `DATABASE_POOL_URL` αν υπάρχει, αλλιώς το `DATABASE_URL_POOLED` της ενσωμάτωσης Prisma και τέλος το `DATABASE_URL`. Για Prisma Postgres το pooled connection string (`pooled.db.prisma.io`) είναι για το runtime, ενώ το `DATABASE_URL` μένει στο direct endpoint (`db.prisma.io`) για `prisma migrate deploy`. Στο Vercel έλεγξε ότι η pooled μεταβλητή ισχύει στο Production και κάνε νέο deployment.
 - Το `NEXTAUTH_SECRET` υπογράφει τα session cookies. Σε production πρέπει να είναι σταθερό και μυστικό.
 - Το `ADMIN_USERNAME` και `ADMIN_PASSWORD` χρησιμοποιούνται από `prisma/bootstrap-admin.ts`.
 - Τα `SCHOOL_OFFICE_USERNAME` και `SCHOOL_OFFICE_PASSWORD` δημιουργούν/ενημερώνουν τον λογαριασμό γραμματείας.
