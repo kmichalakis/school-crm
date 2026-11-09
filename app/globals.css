@@ -1603,6 +1603,42 @@ button:disabled {
   text-decoration: line-through;
 }
 
+.appointment-teacher-toggle {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+}
+
+.appointment-teacher-option {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.appointment-teacher-option:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.appointment-teacher-option.active {
+  border-color: #b8d7d1;
+  background: var(--soft);
+  color: var(--primary-dark);
+}
+
 .appointment-booking-form {
   display: grid;
   gap: 14px;

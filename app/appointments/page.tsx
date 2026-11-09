@@ -18,6 +18,7 @@ type AppointmentsPageProps = {
     date?: string;
     tab?: string;
     teacherId?: string;
+    dayTeacherId?: string;
     notice?: string;
     noticeType?: string;
   }>;
@@ -54,6 +55,9 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
     : [];
   const selectedTeacherId = canSelectTeacher ? params.teacherId ?? "" : currentTeacher?.id ?? "";
   const showAllDaysForTeacher = canSelectTeacher && Boolean(selectedTeacherId);
+  const selectedDayTeacherId = isAdmin && !selectedTeacherId && teachers.some((teacher) => teacher.id === params.dayTeacherId)
+    ? params.dayTeacherId ?? ""
+    : "";
   const today = dateInputValue(new Date());
   const selectedDay = dateToWeekDay(selectedDate) as WeekDay | null;
 
@@ -61,13 +65,15 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
     redirect("/");
   }
 
-  const appointmentQuery = await appointmentWhereForSession({
-    date: selectedDate,
-    role: session.role,
-    selectedTeacherId,
-    sessionUserId: session.userId,
-    today
-  });
+  const appointmentQuery = selectedDayTeacherId
+    ? { where: { date: appointmentDate(selectedDate), teacherId: selectedDayTeacherId }, showAllDaysForTeacher: false }
+    : await appointmentWhereForSession({
+        date: selectedDate,
+        role: session.role,
+        selectedTeacherId,
+        sessionUserId: session.userId,
+        today
+      });
   const appointmentExportParams = new URLSearchParams({ date: selectedDate });
   if (selectedTeacherId) {
     appointmentExportParams.set("teacherId", selectedTeacherId);
@@ -162,7 +168,18 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
     if (selectedTeacherId) {
       tabParams.set("teacherId", selectedTeacherId);
     }
+    if (selectedDayTeacherId) {
+      tabParams.set("dayTeacherId", selectedDayTeacherId);
+    }
     return `/appointments?${tabParams.toString()}`;
+  }
+
+  function dayTeacherHref(teacherId?: string) {
+    const filterParams = new URLSearchParams({ date: selectedDate });
+    if (teacherId) {
+      filterParams.set("dayTeacherId", teacherId);
+    }
+    return `/appointments?${filterParams.toString()}`;
   }
 
   function renderAppointment(appointment: AppointmentRow, allowAdminCancel: boolean) {
@@ -197,6 +214,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
               <input name="id" type="hidden" value={appointment.id} />
               <input name="date" type="hidden" value={selectedDate} />
               <input name="teacherId" type="hidden" value={selectedTeacherId} />
+              <input name="dayTeacherId" type="hidden" value={selectedDayTeacherId} />
               <select aria-label="Νέα ώρα ραντεβού" defaultValue="" disabled={!hasAvailableHour} name="newHour" required>
                 <option value="" disabled>Νέα ώρα</option>
                 {hourOptions.map((slot) => (
@@ -211,6 +229,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
               <input name="id" type="hidden" value={appointment.id} />
               <input name="date" type="hidden" value={selectedDate} />
               <input name="teacherId" type="hidden" value={selectedTeacherId} />
+              <input name="dayTeacherId" type="hidden" value={selectedDayTeacherId} />
               <input name="reason" placeholder="Αιτία ακύρωσης" />
               <button className="secondary-button danger" type="submit">Ακύρωση</button>
             </form>
@@ -255,6 +274,22 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                   <h2>{showAllDaysForTeacher ? "Ραντεβού εκπαιδευτικού" : appointmentDateLabel(selectedDate, selectedDay)}</h2>
                   <p>{bookedAppointments.length} ενεργά ραντεβού</p>
                 </div>
+                {isAdmin ? (
+                  <nav className="appointment-teacher-toggle" aria-label="Ραντεβού εκπαιδευτικού για την επιλεγμένη ημέρα">
+                    <Link className={!selectedTeacherId && !selectedDayTeacherId ? "appointment-teacher-option active" : "appointment-teacher-option"} href={dayTeacherHref()}>
+                      Όλοι
+                    </Link>
+                    {teachers.map((teacher) => (
+                      <Link
+                        className={(selectedDayTeacherId || selectedTeacherId) === teacher.id ? "appointment-teacher-option active" : "appointment-teacher-option"}
+                        href={dayTeacherHref(teacher.id)}
+                        key={teacher.id}
+                      >
+                        {teacher.surname} {teacher.name}
+                      </Link>
+                    ))}
+                  </nav>
+                ) : null}
                 <div className="appointment-list">
                   {bookedAppointments.length > 0 ? bookedAppointments.map((appointment) => renderAppointment(appointment, isAdmin)) : <div className="empty-state">Δεν υπάρχουν ενεργά ραντεβού με τα επιλεγμένα φίλτρα.</div>}
                 </div>
@@ -269,6 +304,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                   <p>Επιλέξτε ημερομηνία για την ημερήσια εικόνα ή εκπαιδευτικό για όλα τα ραντεβού του.</p>
                 </div>
                 <form className="admin-form grid-form" method="get">
+                  {selectedDayTeacherId ? <input name="dayTeacherId" type="hidden" value={selectedDayTeacherId} /> : null}
                   <label>
                     Ημερομηνία
                     <input name="date" type="date" defaultValue={selectedDate} />

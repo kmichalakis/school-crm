@@ -15,13 +15,16 @@ function text(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function appointmentsRedirect(message: string, type: "success" | "error" = "success", date?: string, teacherId?: string): never {
+function appointmentsRedirect(message: string, type: "success" | "error" = "success", date?: string, teacherId?: string, dayTeacherId?: string): never {
   const params = new URLSearchParams({ notice: message, noticeType: type });
   if (date) {
     params.set("date", date);
   }
   if (teacherId) {
     params.set("teacherId", teacherId);
+  }
+  if (dayTeacherId) {
+    params.set("dayTeacherId", dayTeacherId);
   }
   redirect(`/appointments?${params.toString()}`);
 }
@@ -42,10 +45,11 @@ export async function cancelAppointmentByAdminAction(formData: FormData) {
   const id = text(formData, "id");
   const date = text(formData, "date");
   const teacherId = text(formData, "teacherId");
+  const dayTeacherId = text(formData, "dayTeacherId");
   const reason = text(formData, "reason") || "Ακύρωση από το σχολείο.";
 
   if (session.role !== "ADMIN") {
-    appointmentsRedirect("Μόνο ο admin μπορεί να ακυρώσει ραντεβού.", "error", date, teacherId);
+    appointmentsRedirect("Μόνο ο admin μπορεί να ακυρώσει ραντεβού.", "error", date, teacherId, dayTeacherId);
   }
 
   const appointment = await prisma.parentTeacherAppointment.findUnique({
@@ -54,7 +58,7 @@ export async function cancelAppointmentByAdminAction(formData: FormData) {
   });
 
   if (!appointment || appointment.status !== AppointmentStatus.BOOKED) {
-    appointmentsRedirect("Το ραντεβού δεν βρέθηκε ή έχει ήδη ακυρωθεί.", "error", date, teacherId);
+    appointmentsRedirect("Το ραντεβού δεν βρέθηκε ή έχει ήδη ακυρωθεί.", "error", date, teacherId, dayTeacherId);
   }
 
   await prisma.parentTeacherAppointment.update({
@@ -69,7 +73,7 @@ export async function cancelAppointmentByAdminAction(formData: FormData) {
 
   revalidatePath("/appointments");
   revalidatePath("/parent");
-  appointmentsRedirect(`Το ραντεβού ακυρώθηκε. ${appointmentNotificationSummary(notificationResult)}`, "success", date, teacherId);
+  appointmentsRedirect(`Το ραντεβού ακυρώθηκε. ${appointmentNotificationSummary(notificationResult)}`, "success", date, teacherId, dayTeacherId);
 }
 
 export async function changeAppointmentHourByAdminAction(formData: FormData) {
@@ -77,14 +81,15 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
   const id = text(formData, "id");
   const date = text(formData, "date");
   const teacherId = text(formData, "teacherId");
+  const dayTeacherId = text(formData, "dayTeacherId");
   const newHour = Number(text(formData, "newHour"));
 
   if (session.role !== "ADMIN") {
-    appointmentsRedirect("Μόνο ο admin μπορεί να αλλάξει την ώρα ραντεβού.", "error", date, teacherId);
+    appointmentsRedirect("Μόνο ο admin μπορεί να αλλάξει την ώρα ραντεβού.", "error", date, teacherId, dayTeacherId);
   }
   const newSlot = schoolHours.find((slot) => slot.hour === newHour);
   if (!id || !newSlot) {
-    appointmentsRedirect("Επιλέξτε έγκυρη σχολική ώρα.", "error", date, teacherId);
+    appointmentsRedirect("Επιλέξτε έγκυρη σχολική ώρα.", "error", date, teacherId, dayTeacherId);
   }
 
   const current = await prisma.parentTeacherAppointment.findUnique({
@@ -92,16 +97,16 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
     select: { date: true, hour: true, status: true }
   });
   if (!current || current.status !== AppointmentStatus.BOOKED) {
-    appointmentsRedirect("Το ραντεβού δεν βρέθηκε ή έχει ακυρωθεί.", "error", date, teacherId);
+    appointmentsRedirect("Το ραντεβού δεν βρέθηκε ή έχει ακυρωθεί.", "error", date, teacherId, dayTeacherId);
   }
   if (current.hour === newHour) {
-    appointmentsRedirect("Το ραντεβού είναι ήδη καταχωρισμένο σε αυτή την ώρα.", "error", date, teacherId);
+    appointmentsRedirect("Το ραντεβού είναι ήδη καταχωρισμένο σε αυτή την ώρα.", "error", date, teacherId, dayTeacherId);
   }
 
   const appointmentDateValue = dateInputValue(current.date);
   const allowedDate = await isAppointmentDateAllowed(appointmentDateValue);
   if (!allowedDate.allowed) {
-    appointmentsRedirect("Η ημερομηνία του ραντεβού δεν είναι διαθέσιμη.", "error", date, teacherId);
+    appointmentsRedirect("Η ημερομηνία του ραντεβού δεν είναι διαθέσιμη.", "error", date, teacherId, dayTeacherId);
   }
 
   const performChange = () => prisma.$transaction(async (tx) => {
@@ -154,17 +159,17 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
     result = await performChange();
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) {
-      appointmentsRedirect("Η διαθεσιμότητα άλλαξε. Ανανεώστε τη σελίδα και δοκιμάστε ξανά.", "error", date, teacherId);
+      appointmentsRedirect("Η διαθεσιμότητα άλλαξε. Ανανεώστε τη σελίδα και δοκιμάστε ξανά.", "error", date, teacherId, dayTeacherId);
     }
     throw error;
   }
   if (result.error) {
-    appointmentsRedirect(result.error, "error", date, teacherId);
+    appointmentsRedirect(result.error, "error", date, teacherId, dayTeacherId);
   }
 
   const appointment = result.appointment;
   if (!appointment) {
-    appointmentsRedirect("Δεν ήταν δυνατή η αλλαγή ώρας. Δοκιμάστε ξανά.", "error", date, teacherId);
+    appointmentsRedirect("Δεν ήταν δυνατή η αλλαγή ώρας. Δοκιμάστε ξανά.", "error", date, teacherId, dayTeacherId);
   }
   const oldSlot = schoolHours.find((slot) => slot.hour === appointment.hour);
   const body = [
@@ -187,6 +192,7 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
     `Το ραντεβού μεταφέρθηκε στη ${newSlot.label}. ${emailResult.sent ? "Ο γονέας ενημερώθηκε με email." : "Το email προς τον γονέα δεν στάλθηκε."}`,
     emailResult.sent ? "success" : "error",
     date,
-    teacherId
+    teacherId,
+    dayTeacherId
   );
 }
