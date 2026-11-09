@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppointmentStatus, type WeekDay } from "@prisma/client";
 import { AppNavigation } from "@/app/app-navigation";
-import { cancelAppointmentByAdminAction } from "@/app/appointments/actions";
+import { cancelAppointmentByAdminAction, changeAppointmentHourByAdminAction } from "@/app/appointments/actions";
 import { CancelledAppointments } from "@/app/appointments/cancelled-appointments";
 import { appointmentDate, appointmentDateLabel, appointmentStatusLabel, getAppointmentSetting, nextWeekdayDate } from "@/lib/appointments";
 import { appointmentWhereForSession, loadAppointmentRows, type AppointmentRow, validAppointmentDate } from "@/lib/appointment-queries";
@@ -11,7 +11,7 @@ import { dateInputValue } from "@/lib/school-calendar";
 import { prisma } from "@/lib/prisma";
 import { hourLabel } from "@/lib/report-helpers";
 import { parseSessionToken, sessionCookieName } from "@/lib/session";
-import { dateToWeekDay } from "@/lib/school-time";
+import { dateToWeekDay, schoolHours } from "@/lib/school-time";
 
 type AppointmentsPageProps = {
   searchParams: Promise<{
@@ -118,6 +118,12 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const dashboardCountBySlot = new Map(dashboardCounts.map((entry) => [`${entry.teacherId}:${entry.hour}`, entry._count._all]));
   const unavailableTeacherIds = new Set(dashboardUnavailableDays.map((day) => day.teacherId));
   const capacityPerSlot = appointmentSetting?.maxPerTeacherSlot ?? 1;
+  const rescheduleCapacity = isAdmin ? (appointmentSetting?.maxPerTeacherSlot ?? (await getAppointmentSetting()).maxPerTeacherSlot) : 0;
+  const bookedCountBySlot = new Map<string, number>();
+  for (const appointment of bookedAppointments) {
+    const key = `${appointment.teacherId}:${dateInputValue(appointment.date)}:${appointment.hour}`;
+    bookedCountBySlot.set(key, (bookedCountBySlot.get(key) ?? 0) + 1);
+  }
   const dashboardStats = Array.from(
     dashboardOfficeHours.reduce((map, officeHour) => {
       const current = map.get(officeHour.teacherId) ?? {
@@ -162,6 +168,11 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   function renderAppointment(appointment: AppointmentRow, allowAdminCancel: boolean) {
     const dateValue = dateInputValue(appointment.date);
     const isCancelled = appointment.status !== AppointmentStatus.BOOKED;
+    const hourOptions = schoolHours.filter((slot) => slot.hour !== appointment.hour).map((slot) => ({
+      ...slot,
+      full: (bookedCountBySlot.get(`${appointment.teacherId}:${dateValue}:${slot.hour}`) ?? 0) >= rescheduleCapacity
+    }));
+    const hasAvailableHour = hourOptions.some((slot) => !slot.full);
     return (
       <article className={isCancelled ? "appointment-row cancelled" : "appointment-row"} key={appointment.id}>
         <div>
@@ -181,15 +192,29 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
         </div>
         <span className={isCancelled ? "sync-pill" : "sync-pill ready"}>{appointmentStatusLabel(appointment.status)}</span>
         {allowAdminCancel && !isCancelled ? (
-          <form action={cancelAppointmentByAdminAction} className="appointment-cancel-form">
-            <input name="id" type="hidden" value={appointment.id} />
-            <input name="date" type="hidden" value={selectedDate} />
-            <input name="teacherId" type="hidden" value={selectedTeacherId} />
-            <input name="reason" placeholder="Αιτία ακύρωσης" />
-            <button className="secondary-button danger" type="submit">
-              Ακύρωση
-            </button>
-          </form>
+          <section className="appointment-admin-actions" aria-label="Ενέργειες ραντεβού">
+            <form action={changeAppointmentHourByAdminAction} className="appointment-hour-form">
+              <input name="id" type="hidden" value={appointment.id} />
+              <input name="date" type="hidden" value={selectedDate} />
+              <input name="teacherId" type="hidden" value={selectedTeacherId} />
+              <select aria-label="Νέα ώρα ραντεβού" defaultValue="" disabled={!hasAvailableHour} name="newHour" required>
+                <option value="" disabled>Νέα ώρα</option>
+                {hourOptions.map((slot) => (
+                  <option disabled={slot.full} key={slot.hour} value={slot.hour}>
+                    {slot.label} · {slot.starts}-{slot.ends}{slot.full ? " (πλήρης)" : ""}
+                  </option>
+                ))}
+              </select>
+              <button className="secondary-button" disabled={!hasAvailableHour} type="submit">Αλλαγή ώρας</button>
+            </form>
+            <form action={cancelAppointmentByAdminAction} className="appointment-cancel-form">
+              <input name="id" type="hidden" value={appointment.id} />
+              <input name="date" type="hidden" value={selectedDate} />
+              <input name="teacherId" type="hidden" value={selectedTeacherId} />
+              <input name="reason" placeholder="Αιτία ακύρωσης" />
+              <button className="secondary-button danger" type="submit">Ακύρωση</button>
+            </form>
+          </section>
         ) : null}
       </article>
     );

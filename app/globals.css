@@ -1649,6 +1649,31 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.appointment-admin-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.appointment-hour-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.appointment-hour-form select {
+  min-height: 40px;
+  min-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: white;
+}
+
 .appointment-cancel-form input,
 .inline-form input,
 .inline-form select {
