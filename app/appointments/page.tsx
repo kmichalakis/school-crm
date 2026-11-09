@@ -53,9 +53,17 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const teachers = canSelectTeacher
     ? await prisma.teacher.findMany({ orderBy: [{ surname: "asc" }, { name: "asc" }] })
     : [];
+  const dailyTeacherAppointments = isAdmin
+    ? await prisma.parentTeacherAppointment.groupBy({
+        by: ["teacherId"],
+        where: { date: appointmentDate(selectedDate), status: AppointmentStatus.BOOKED }
+      })
+    : [];
+  const dailyTeacherIds = new Set(dailyTeacherAppointments.map((appointment) => appointment.teacherId));
+  const dailyTeachers = teachers.filter((teacher) => dailyTeacherIds.has(teacher.id));
   const selectedTeacherId = canSelectTeacher ? params.teacherId ?? "" : currentTeacher?.id ?? "";
   const showAllDaysForTeacher = canSelectTeacher && Boolean(selectedTeacherId);
-  const selectedDayTeacherId = isAdmin && !selectedTeacherId && teachers.some((teacher) => teacher.id === params.dayTeacherId)
+  const selectedDayTeacherId = isAdmin && !selectedTeacherId && dailyTeachers.some((teacher) => teacher.id === params.dayTeacherId)
     ? params.dayTeacherId ?? ""
     : "";
   const today = dateInputValue(new Date());
@@ -279,7 +287,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                     <Link className={!selectedTeacherId && !selectedDayTeacherId ? "appointment-teacher-option active" : "appointment-teacher-option"} href={dayTeacherHref()}>
                       Όλοι
                     </Link>
-                    {teachers.map((teacher) => (
+                    {dailyTeachers.map((teacher) => (
                       <Link
                         className={(selectedDayTeacherId || selectedTeacherId) === teacher.id ? "appointment-teacher-option active" : "appointment-teacher-option"}
                         href={dayTeacherHref(teacher.id)}
