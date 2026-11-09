@@ -116,7 +116,7 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
       return { error: "Το ραντεβού είναι ήδη καταχωρισμένο σε αυτή την ώρα." };
     }
 
-    const [blockedDay, unavailableDay, setting, bookedCount, duplicate, parentConflict] = await Promise.all([
+    const [blockedDay, unavailableDay, setting, bookedCount, duplicate] = await Promise.all([
       tx.appointmentBlockedDay.findUnique({ where: { date: appointment.date } }),
       tx.teacherUnavailableDay.findUnique({ where: { teacherId_date: { teacherId: appointment.teacherId, date: appointment.date } } }),
       tx.appointmentSetting.findFirst({ orderBy: { createdAt: "asc" } }),
@@ -133,16 +133,6 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
           hour: newHour
         },
         select: { id: true }
-      }),
-      tx.parentTeacherAppointment.findFirst({
-        where: {
-          id: { not: appointment.id },
-          parentId: appointment.parentId,
-          date: appointment.date,
-          hour: newHour,
-          status: AppointmentStatus.BOOKED
-        },
-        select: { id: true }
       })
     ]);
 
@@ -153,12 +143,8 @@ export async function changeAppointmentHourByAdminAction(formData: FormData) {
       return { error: "Η επιλεγμένη ώρα έχει συμπληρώσει τις διαθέσιμες θέσεις." };
     }
     if (duplicate) {
-      return { error: "Υπάρχει ήδη εγγραφή ραντεβού για τον ίδιο γονέα, μαθητή και ώρα." };
+      return { error: "Υπάρχει ήδη εγγραφή για τον ίδιο γονέα, μαθητή, εκπαιδευτικό και ώρα." };
     }
-    if (parentConflict) {
-      return { error: "Ο γονέας έχει ήδη άλλο ραντεβού την επιλεγμένη ώρα." };
-    }
-
     await tx.parentTeacherAppointment.update({ where: { id: appointment.id }, data: { hour: newHour } });
     return { appointment };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
