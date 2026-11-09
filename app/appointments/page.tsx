@@ -53,7 +53,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const teachers = canSelectTeacher
     ? await prisma.teacher.findMany({ orderBy: [{ surname: "asc" }, { name: "asc" }] })
     : [];
-  const dailyTeacherAppointments = isAdmin
+  const dailyTeacherAppointments = usesAdminAppointmentView
     ? await prisma.parentTeacherAppointment.groupBy({
         by: ["teacherId"],
         where: { date: appointmentDate(selectedDate), status: AppointmentStatus.BOOKED }
@@ -63,7 +63,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
   const dailyTeachers = teachers.filter((teacher) => dailyTeacherIds.has(teacher.id));
   const selectedTeacherId = canSelectTeacher ? params.teacherId ?? "" : currentTeacher?.id ?? "";
   const showAllDaysForTeacher = canSelectTeacher && Boolean(selectedTeacherId);
-  const selectedDayTeacherId = isAdmin && !selectedTeacherId && dailyTeachers.some((teacher) => teacher.id === params.dayTeacherId)
+  const selectedDayTeacherId = usesAdminAppointmentView && !selectedTeacherId && dailyTeachers.some((teacher) => teacher.id === params.dayTeacherId)
     ? params.dayTeacherId ?? ""
     : "";
   const today = dateInputValue(new Date());
@@ -282,7 +282,7 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
                   <h2>{showAllDaysForTeacher ? "Ραντεβού εκπαιδευτικού" : appointmentDateLabel(selectedDate, selectedDay)}</h2>
                   <p>{bookedAppointments.length} ενεργά ραντεβού</p>
                 </div>
-                {isAdmin ? (
+                {usesAdminAppointmentView ? (
                   <nav className="appointment-teacher-toggle" aria-label="Ραντεβού εκπαιδευτικού για την επιλεγμένη ημέρα">
                     <Link className={!selectedTeacherId && !selectedDayTeacherId ? "appointment-teacher-option active" : "appointment-teacher-option"} href={dayTeacherHref()}>
                       Όλοι
